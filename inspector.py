@@ -3,19 +3,31 @@ import keyboard
 import json
 import time
 import os
+import ctypes
 
 def main():
     saved_locations = {}
     
-    # Get the handle of the current console window so we can bring it to front later
-    console_window = auto.GetConsoleWindow()
-    console_elem = auto.ControlFromHandle(console_window)
+    # Try to get the handle of the current console window (optional feature)
+    console_elem = None
+    try:
+        # Get console window handle using ctypes directly
+        kernel32 = ctypes.windll.kernel32
+        console_window = kernel32.GetConsoleWindow()
+        if console_window and console_window != 0:
+            console_elem = auto.ControlFromHandle(console_window)
+    except Exception as e:
+        print(f"Note: Console focus feature unavailable ({e})")
+        print("You'll need to manually switch windows after capture.\n")
 
-    print("--- Coordinate Capture Tool (Focus Fixed) ---")
+    print("--- Coordinate Capture Tool ---")
     print("1. Hover over an element in your app.")
     print("2. Press 'ENTER' to capture.")
-    print("3. The script will switch focus here so you can type the name.")
-    print("4. Press 'ENTER' to save, then 'ALT+TAB' back to your app.")
+    if console_elem:
+        print("3. Focus will switch here automatically to type the name.")
+    else:
+        print("3. ALT+TAB back here to type the name.")
+    print("4. Press 'ENTER' to save, then go back to your app.")
     print("5. Press 'ESC' to finish.\n")
 
     try:
