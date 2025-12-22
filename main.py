@@ -314,7 +314,7 @@ class CRMAutomator:
         print(f"Category Term: {cat_term} -> Report Term: {rep_term}")
         print("=" * 60)
         
-        # Get search box coordinates (reused for both steps)
+        # Get search box coordinates for Step 1 (category filter)
         search_box = coords.get("search_box", {})
         sb_x, sb_y = search_box.get("x"), search_box.get("y")
         
@@ -322,12 +322,12 @@ class CRMAutomator:
             print("ERROR: search_box coordinates not found in config.")
             return False
         
-        # Get list result coordinates (reused for both steps)
-        list_result = coords.get("list_result_1", {})
-        lr_x, lr_y = list_result.get("x"), list_result.get("y")
+        # Get search box coordinates for Step 2 (report filter - different location)
+        search_box_2 = coords.get("search_box_2", {})
+        sb2_x, sb2_y = search_box_2.get("x"), search_box_2.get("y")
         
-        if lr_x is None or lr_y is None:
-            print("ERROR: list_result_1 coordinates not found in config.")
+        if sb2_x is None or sb2_y is None:
+            print("ERROR: search_box_2 coordinates not found in config.")
             return False
         
         # ═══════════════════════════════════════════════════════════════════════
@@ -349,7 +349,7 @@ class CRMAutomator:
         print(f"  1c. Typing category term: '{cat_term}'...")
         pyautogui.write(cat_term, interval=typing_interval)
         
-        # 1d: Press ENTER to filter
+        # 1d: Press ENTER to filter, then ENTER again to select top result
         print("  1d. Pressing ENTER to filter list...")
         pyautogui.press('enter')
         
@@ -357,24 +357,27 @@ class CRMAutomator:
         print("  1e. Waiting 1.0s for list to filter...")
         time.sleep(1.0)
         
-        # 1f: Select top result to expand category folders
-        print(f"  1f. Clicking top result at ({lr_x}, {lr_y}) to expand category...")
-        pyautogui.click(lr_x, lr_y)
+        # 1f: Press ENTER again to select top result (expands category)
+        print("  1f. Pressing ENTER to select top result...")
+        pyautogui.press('enter')
         print("  -> Category expanded")
         
+        # Brief pause to let UI settle after category expansion
+        time.sleep(0.5)
+        
         # ═══════════════════════════════════════════════════════════════════════
-        # STEP 2: Filter by Report (Second Write)
+        # STEP 2: Filter by Report (Second Write - DIFFERENT LOCATION)
         # ═══════════════════════════════════════════════════════════════════════
         print("\n" + "─" * 60)
         print("STEP 2: Filter by Report (Second Write)")
         print("─" * 60)
         
-        # 2a: Focus the SAME search box again
-        print(f"\n  2a. Clicking 'Catálogo' search box again at ({sb_x}, {sb_y})...")
-        pyautogui.click(sb_x, sb_y)
+        # 2a: Focus the SECOND search box (different location)
+        print(f"\n  2a. Clicking report search box at ({sb2_x}, {sb2_y})...")
+        pyautogui.click(sb2_x, sb2_y)
         
-        # 2b: Sanitize - Clear category term
-        print("  2b. Sanitizing: Ctrl+A, Backspace (removes category term)...")
+        # 2b: Sanitize - Clear any existing text
+        print("  2b. Sanitizing: Ctrl+A, Backspace...")
         self._clear_field()
         
         # 2c: Type the report term
@@ -389,9 +392,9 @@ class CRMAutomator:
         print("  2e. Waiting 1.0s for list to filter...")
         time.sleep(1.0)
         
-        # 2f: Select top result (specific report type)
-        print(f"  2f. Clicking top result at ({lr_x}, {lr_y}) to select report type...")
-        pyautogui.click(lr_x, lr_y)
+        # 2f: Press ENTER again to select top result
+        print("  2f. Pressing ENTER to select report type...")
+        pyautogui.press('enter')
         print("  -> Report type selected, grid should load on right")
         
         # ═══════════════════════════════════════════════════════════════════════
