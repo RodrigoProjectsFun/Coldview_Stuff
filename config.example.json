@@ -57,6 +57,12 @@
                 "x": 960,
                 "y": 540
             }
+        },
+        "timing": {
+            "filter_delay": 5.0,
+            "ui_settle_delay": 5.0,
+            "grid_load_delay": 5.0,
+            "popup_delay": 5.0
         }
     }
 }

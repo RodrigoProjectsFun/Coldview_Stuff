@@ -297,6 +297,7 @@ class CRMAutomator:
         workflow_config = self.config.get("search_workflow", {})
         inputs = workflow_config.get("inputs", {})
         coords = workflow_config.get("coords", {})
+        timing = workflow_config.get("timing", {})
         
         # Use provided terms or fallback to config
         cat_term = category_term or inputs.get("category_term", "")
@@ -307,7 +308,12 @@ class CRMAutomator:
             print(f"  category_term: '{cat_term}' | report_term: '{rep_term}'")
             return False
         
+        # Load timing configuration with defaults
         typing_interval = self.config.get("timing", {}).get("typing_interval", 0.05)
+        filter_delay = timing.get("filter_delay", 1.0)
+        ui_settle_delay = timing.get("ui_settle_delay", 0.5)
+        grid_load_delay = timing.get("grid_load_delay", 2.0)
+        popup_delay = timing.get("popup_delay", 1.0)
         
         print("=" * 60)
         print("Module 3: Hierarchy Search & Retrieval")
@@ -354,8 +360,8 @@ class CRMAutomator:
         pyautogui.press('enter')
         
         # 1e: Wait for list to filter
-        print("  1e. Waiting 1.0s for list to filter...")
-        time.sleep(1.0)
+        print(f"  1e. Waiting {filter_delay}s for list to filter...")
+        time.sleep(filter_delay)
         
         # 1f: Press ENTER again to select top result (expands category)
         print("  1f. Pressing ENTER to select top result...")
@@ -363,7 +369,7 @@ class CRMAutomator:
         print("  -> Category expanded")
         
         # Brief pause to let UI settle after category expansion
-        time.sleep(0.5)
+        time.sleep(ui_settle_delay)
         
         # ═══════════════════════════════════════════════════════════════════════
         # STEP 2: Filter by Report (Second Write - DIFFERENT LOCATION)
@@ -389,8 +395,8 @@ class CRMAutomator:
         pyautogui.press('enter')
         
         # 2e: Wait for list to filter again
-        print("  2e. Waiting 1.0s for list to filter...")
-        time.sleep(1.0)
+        print(f"  2e. Waiting {filter_delay}s for list to filter...")
+        time.sleep(filter_delay)
         
         # 2f: Press ENTER again to select top result
         print("  2f. Pressing ENTER to select report type...")
@@ -405,8 +411,8 @@ class CRMAutomator:
         print("─" * 60)
         
         # 3a: Wait for grid to populate
-        print("\n  3a. Waiting 2.0s for right-hand grid to populate...")
-        time.sleep(2.0)
+        print(f"\n  3a. Waiting {grid_load_delay}s for right-hand grid to populate...")
+        time.sleep(grid_load_delay)
         print("  -> Grid populated")
         
         # 3b: Select target row in main grid
@@ -441,8 +447,8 @@ class CRMAutomator:
         print("─" * 60)
         
         # 4a: Wait for potential popup
-        print("\n  4a. Waiting 1.0s for 'Error de configuración Dsn' popup...")
-        time.sleep(1.0)
+        print(f"\n  4a. Waiting {popup_delay}s for 'Error de configuración Dsn' popup...")
+        time.sleep(popup_delay)
         
         # 4b: Attempt to dismiss popup if present
         popup_ok = coords.get("popup_ok_btn", {})
