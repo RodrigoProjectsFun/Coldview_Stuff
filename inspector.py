@@ -6,41 +6,46 @@ import time
 def main():
     saved_locations = {}
     
-    print("--- Coordinate Capture Tool ---")
-    print("1. Hover over an element in your app.")
-    print("2. Press 'ENTER' to capture its coordinates.")
-    print("3. Type the name for the location in this terminal when prompted.")
-    print("4. Press 'ESC' to finish and generate the JSON.\n")
+    print("--- Coordinate Capture Tool (Final) ---")
+    print("1. Hover over an element.")
+    print("2. Press 'ENTER' to capture.")
+    print("3. Type name, then press 'ENTER' again.")
+    print("4. Press 'ESC' to finish.\n")
 
     try:
         while True:
-            # Check if ESC is pressed to exit
             if keyboard.is_pressed('esc'):
                 break
-
-            # Check if ENTER is pressed to capture
             if keyboard.is_pressed('enter'):
-                # 1. Capture the element under the mouse
+                # 1. Capture element
                 element = auto.ControlFromCursor()
+                # 2. Get coordinates safely
+                # Access the rectangle properties directly
+                rect = element.BoundingRectangle
+                left = rect.left
+                top = rect.top
+                right = rect.right
+                bottom = rect.bottom
                 
-                # 2. Get the center point of the element
-                # Using the element center is safer than raw mouse position
-                rect = element.GetBoundingRectangle()
-                center_x = int((rect.left + rect.right) / 2)
-                center_y = int((rect.top + rect.bottom) / 2)
+                # Calculate center
+                center_x = int((left + right) / 2)
+                center_y = int((top + bottom) / 2)
 
-                # 3. Visual feedback (draws a red box briefly)
-                rect.Draw(0xFF0000, 1)
+                # 3. Visual feedback: Use the element's own method instead of the rect's
+                try:
+                    # Draw a red box around the element
+                    element.DrawOutline(colour=0xFF0000, thickness=2)
+                except AttributeError:
+                    # If this specific control type doesn't support drawing, just skip it
+                    pass
 
-                # 4. Prompt user for the key name (e.g., "search_box")
-                # We add a small sleep so the 'Enter' press doesn't skip the input prompt
+                # 4. Input handling
                 time.sleep(0.2) 
-                
-                # Clear any buffered input to prevent glitches
                 while keyboard.is_pressed('enter'): pass
                 
-                print(f"\n[+] Capturing coordinates: x={center_x}, y={center_y}")
-                key_name = input("    Enter name for this location (e.g., search_box): ").strip()
+                print(f"\n[+] Captured Element: x={center_x}, y={center_y}")
+                
+                key_name = input("    Name this location (e.g., search_box): ").strip()
 
                 if key_name:
                     saved_locations[key_name] = {
@@ -49,7 +54,7 @@ def main():
                     }
                     print(f"    Saved '{key_name}'!")
                 else:
-                    print("    Skipped (no name provided).")
+                    print("    Skipped.")
 
                 print("\nResuming... (Press ESC to finish)")
 
@@ -58,13 +63,13 @@ def main():
     except KeyboardInterrupt:
         pass
 
-    # Output the final JSON
+    # Final Output
     print("\n" + "="*30)
     print("FINAL JSON OUTPUT:")
     print("="*30)
     print(json.dumps(saved_locations, indent=4))
 
-    # Optional: Save to file
+    # Save to file
     with open("locations.json", "w") as f:
         json.dump(saved_locations, f, indent=4)
     print("\nSaved to locations.json")
