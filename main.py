@@ -261,180 +261,207 @@ class CRMAutomator:
         print("Login sequence completed successfully.")
         return True
     
-    def open_report_workflow(self, report_code: str = None) -> bool:
+    def search_and_extract(self, category_term: str = None, report_term: str = None) -> bool:
         """
-        Execute the COLDview Report Retrieval Workflow.
+        Execute the COLDview Hierarchy Search & Retrieval Workflow.
         
-        Navigates the interface to search for a report category, selects
-        a target report from the grid, and executes the "Open" command
-        while handling potential legacy error popups.
+        Performs a two-step "Drill-Down" search by reusing the same search box
+        twice to filter the hierarchy before opening the final file.
         
         Workflow Steps:
-        1. Set Scope: Click "Proceso" dropdown to ensure window is active
-        2. Search: Click catalog input, sanitize, type report code, press ENTER
-        3. Wait for list refresh (1.5s)
-        4. Select Category: Click first matching item
-        5. Wait for grid load (2.0s)
-        6. Select Report Row: Click target row in main grid
-        7. Trigger Open: Click "Abrir Emisión" button
-        8. Handle Popup: Dismiss error popup if it appears
+        Step 1 - Filter by Category (First Write):
+            - Focus search box, sanitize, type category_term, ENTER
+            - Wait 1.0s, click top result to expand category folders
+        
+        Step 2 - Filter by Report (Second Write):
+            - Focus same search box, sanitize, type report_term, ENTER
+            - Wait 1.0s, click top result to select specific report type
+        
+        Step 3 - Select & Open:
+            - Wait 2.0s for grid to populate
+            - Click target row, click "Abrir Emisión"
+        
+        Step 4 - Error Handling:
+            - Wait 1.0s, dismiss error popup if present
         
         Args:
-            report_code: Code to search for (e.g., "CTAMAE").
-                        If not provided, uses config["retrieval_task"]["report_code"].
+            category_term: Category to filter by (e.g., "BCP").
+                          If not provided, uses config["search_workflow"]["inputs"]["category_term"].
+            report_term: Report code to filter by (e.g., "CTAMAE").
+                        If not provided, uses config["search_workflow"]["inputs"]["report_term"].
         
         Returns:
             bool: True if workflow completed successfully, False otherwise.
         """
-        # Get retrieval task configuration
-        retrieval_config = self.config.get("retrieval_task", {})
-        coords = retrieval_config.get("coords", {})
+        # Get search workflow configuration
+        workflow_config = self.config.get("search_workflow", {})
+        inputs = workflow_config.get("inputs", {})
+        coords = workflow_config.get("coords", {})
         
-        # Use provided report code or fallback to config
-        target_code = report_code or retrieval_config.get("report_code", "")
+        # Use provided terms or fallback to config
+        cat_term = category_term or inputs.get("category_term", "")
+        rep_term = report_term or inputs.get("report_term", "")
         
-        if not target_code:
-            print("ERROR: No report code specified in method call or config.")
+        if not cat_term or not rep_term:
+            print("ERROR: Both category_term and report_term are required.")
+            print(f"  category_term: '{cat_term}' | report_term: '{rep_term}'")
             return False
+        
+        typing_interval = self.config.get("timing", {}).get("typing_interval", 0.05)
         
         print("=" * 60)
-        print("Module 3: Report Retrieval & Error Handling")
-        print(f"Target Report Code: {target_code}")
+        print("Module 3: Hierarchy Search & Retrieval")
+        print(f"Category Term: {cat_term} -> Report Term: {rep_term}")
         print("=" * 60)
         
-        # ─────────────────────────────────────────────────────────────────────
-        # STEP 1: Set Scope - Click Process Dropdown
-        # ─────────────────────────────────────────────────────────────────────
-        print("\nStep 1: Setting scope - clicking 'Proceso' dropdown...")
-        process_dropdown = coords.get("process_dropdown", {})
-        x, y = process_dropdown.get("x"), process_dropdown.get("y")
+        # Get search box coordinates (reused for both steps)
+        search_box = coords.get("search_box", {})
+        sb_x, sb_y = search_box.get("x"), search_box.get("y")
         
-        if x is None or y is None:
-            print("ERROR: process_dropdown coordinates not found in config.")
+        if sb_x is None or sb_y is None:
+            print("ERROR: search_box coordinates not found in config.")
             return False
         
-        pyautogui.click(x, y)
-        print(f"  -> Clicked process dropdown at ({x}, {y})")
-        # Brief pause to ensure window focus is established
-        time.sleep(0.5)
+        # Get list result coordinates (reused for both steps)
+        list_result = coords.get("list_result_1", {})
+        lr_x, lr_y = list_result.get("x"), list_result.get("y")
         
-        # ─────────────────────────────────────────────────────────────────────
-        # STEP 2: Search Sequence
-        # ─────────────────────────────────────────────────────────────────────
-        print("\nStep 2: Executing search sequence...")
-        
-        # 2a: Click the "Catálogo" input box
-        search_input = coords.get("search_input", {})
-        x, y = search_input.get("x"), search_input.get("y")
-        
-        if x is None or y is None:
-            print("ERROR: search_input coordinates not found in config.")
+        if lr_x is None or lr_y is None:
+            print("ERROR: list_result_1 coordinates not found in config.")
             return False
         
-        pyautogui.click(x, y)
-        print(f"  -> Clicked 'Catálogo' input at ({x}, {y})")
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 1: Filter by Category (First Write)
+        # ═══════════════════════════════════════════════════════════════════════
+        print("\n" + "─" * 60)
+        print("STEP 1: Filter by Category (First Write)")
+        print("─" * 60)
         
-        # 2b: Sanitize - Clear any existing text
-        print("  -> Sanitizing: Ctrl+A, Backspace...")
+        # 1a: Focus the search box
+        print(f"\n  1a. Clicking 'Catálogo' search box at ({sb_x}, {sb_y})...")
+        pyautogui.click(sb_x, sb_y)
+        
+        # 1b: Sanitize - Clear any existing text
+        print("  1b. Sanitizing: Ctrl+A, Backspace...")
         self._clear_field()
         
-        # 2c: Type the report code
-        typing_interval = self.config.get("timing", {}).get("typing_interval", 0.05)
-        pyautogui.write(target_code, interval=typing_interval)
-        print(f"  -> Typed: {target_code}")
+        # 1c: Type the category term
+        print(f"  1c. Typing category term: '{cat_term}'...")
+        pyautogui.write(cat_term, interval=typing_interval)
         
-        # 2d: Press ENTER to trigger search
-        print("  -> Pressing ENTER (COLDview requires ENTER to search)...")
+        # 1d: Press ENTER to filter
+        print("  1d. Pressing ENTER to filter list...")
         pyautogui.press('enter')
         
-        # ─────────────────────────────────────────────────────────────────────
-        # STEP 3: Wait for List Refresh
-        # ─────────────────────────────────────────────────────────────────────
-        print("\nStep 3: Waiting 1.5s for left-hand list to refresh...")
-        # IMPORTANT: Legacy UI needs time for backend query + render
-        time.sleep(1.5)
-        print("  -> List refresh complete")
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # STEP 4: Select Category
-        # ─────────────────────────────────────────────────────────────────────
-        print("\nStep 4: Selecting first category match...")
-        category_match = coords.get("category_match_1", {})
-        x, y = category_match.get("x"), category_match.get("y")
-        
-        if x is None or y is None:
-            print("ERROR: category_match_1 coordinates not found in config.")
-            return False
-        
-        pyautogui.click(x, y)
-        print(f"  -> Clicked category at ({x}, {y})")
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # STEP 5: Wait for Grid to Populate
-        # ─────────────────────────────────────────────────────────────────────
-        print("\nStep 5: Waiting 2.0s for main grid to populate...")
-        # IMPORTANT: Database-bound operation to fetch all reports in category
-        time.sleep(2.0)
-        print("  -> Grid population complete")
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # STEP 6: Select Report Row
-        # ─────────────────────────────────────────────────────────────────────
-        print("\nStep 6: Selecting report row in main grid...")
-        # NOTE: MVP uses fixed coordinates. Future: OCR for date-based selection
-        report_row = coords.get("report_grid_row", {})
-        x, y = report_row.get("x"), report_row.get("y")
-        
-        if x is None or y is None:
-            print("ERROR: report_grid_row coordinates not found in config.")
-            return False
-        
-        pyautogui.click(x, y)
-        print(f"  -> Clicked report row at ({x}, {y})")
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # STEP 7: Trigger Open - Click "Abrir Emisión"
-        # ─────────────────────────────────────────────────────────────────────
-        print("\nStep 7: Clicking 'Abrir Emisión' button...")
-        open_btn = coords.get("open_emission_btn", {})
-        x, y = open_btn.get("x"), open_btn.get("y")
-        
-        if x is None or y is None:
-            print("ERROR: open_emission_btn coordinates not found in config.")
-            return False
-        
-        pyautogui.click(x, y)
-        print(f"  -> Clicked 'Abrir Emisión' at ({x}, {y})")
-        
-        # ─────────────────────────────────────────────────────────────────────
-        # STEP 8: Resilience - Handle Error Popup
-        # ─────────────────────────────────────────────────────────────────────
-        print("\nStep 8: Checking for error popup ('Error de configuración Dsn')...")
-        # Wait for popup to potentially appear
+        # 1e: Wait for list to filter
+        print("  1e. Waiting 1.0s for list to filter...")
         time.sleep(1.0)
         
-        error_ok = coords.get("error_popup_ok", {})
-        x, y = error_ok.get("x"), error_ok.get("y")
+        # 1f: Select top result to expand category folders
+        print(f"  1f. Clicking top result at ({lr_x}, {lr_y}) to expand category...")
+        pyautogui.click(lr_x, lr_y)
+        print("  -> Category expanded")
         
-        if x is not None and y is not None:
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 2: Filter by Report (Second Write)
+        # ═══════════════════════════════════════════════════════════════════════
+        print("\n" + "─" * 60)
+        print("STEP 2: Filter by Report (Second Write)")
+        print("─" * 60)
+        
+        # 2a: Focus the SAME search box again
+        print(f"\n  2a. Clicking 'Catálogo' search box again at ({sb_x}, {sb_y})...")
+        pyautogui.click(sb_x, sb_y)
+        
+        # 2b: Sanitize - Clear category term
+        print("  2b. Sanitizing: Ctrl+A, Backspace (removes category term)...")
+        self._clear_field()
+        
+        # 2c: Type the report term
+        print(f"  2c. Typing report term: '{rep_term}'...")
+        pyautogui.write(rep_term, interval=typing_interval)
+        
+        # 2d: Press ENTER to filter
+        print("  2d. Pressing ENTER to filter list...")
+        pyautogui.press('enter')
+        
+        # 2e: Wait for list to filter again
+        print("  2e. Waiting 1.0s for list to filter...")
+        time.sleep(1.0)
+        
+        # 2f: Select top result (specific report type)
+        print(f"  2f. Clicking top result at ({lr_x}, {lr_y}) to select report type...")
+        pyautogui.click(lr_x, lr_y)
+        print("  -> Report type selected, grid should load on right")
+        
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 3: Select & Open
+        # ═══════════════════════════════════════════════════════════════════════
+        print("\n" + "─" * 60)
+        print("STEP 3: Select & Open")
+        print("─" * 60)
+        
+        # 3a: Wait for grid to populate
+        print("\n  3a. Waiting 2.0s for right-hand grid to populate...")
+        time.sleep(2.0)
+        print("  -> Grid populated")
+        
+        # 3b: Select target row in main grid
+        grid_row = coords.get("grid_row_target", {})
+        gr_x, gr_y = grid_row.get("x"), grid_row.get("y")
+        
+        if gr_x is None or gr_y is None:
+            print("ERROR: grid_row_target coordinates not found in config.")
+            return False
+        
+        print(f"  3b. Clicking target row at ({gr_x}, {gr_y})...")
+        pyautogui.click(gr_x, gr_y)
+        print("  -> Row selected")
+        
+        # 3c: Click "Abrir Emisión" button
+        open_btn = coords.get("open_btn", {})
+        ob_x, ob_y = open_btn.get("x"), open_btn.get("y")
+        
+        if ob_x is None or ob_y is None:
+            print("ERROR: open_btn coordinates not found in config.")
+            return False
+        
+        print(f"  3c. Clicking 'Abrir Emisión' button at ({ob_x}, {ob_y})...")
+        pyautogui.click(ob_x, ob_y)
+        print("  -> Open command executed")
+        
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 4: Error Handling
+        # ═══════════════════════════════════════════════════════════════════════
+        print("\n" + "─" * 60)
+        print("STEP 4: Error Handling (Popup Watchdog)")
+        print("─" * 60)
+        
+        # 4a: Wait for potential popup
+        print("\n  4a. Waiting 1.0s for 'Error de configuración Dsn' popup...")
+        time.sleep(1.0)
+        
+        # 4b: Attempt to dismiss popup if present
+        popup_ok = coords.get("popup_ok_btn", {})
+        po_x, po_y = popup_ok.get("x"), popup_ok.get("y")
+        
+        if po_x is not None and po_y is not None:
             try:
-                # Attempt to click the popup's "Aceptar" button
-                # If popup exists, this dismisses it; if not, it's a no-op click
-                print(f"  -> Attempting to dismiss popup at ({x}, {y})...")
-                pyautogui.click(x, y)
-                print("  -> Popup handler executed (dismissed if present)")
+                print(f"  4b. Clicking 'Aceptar' at ({po_x}, {po_y}) to dismiss popup...")
+                pyautogui.click(po_x, po_y)
+                print("  -> Popup dismissed (if it was present)")
             except Exception as e:
-                # Non-fatal: popup might not appear, which is fine
-                print(f"  -> Popup check completed (no popup or already dismissed): {e}")
+                print(f"  -> Popup handler completed with note: {e}")
         else:
-            print("  -> No error_popup_ok coordinates configured, skipping popup handler")
+            print("  4b. No popup_ok_btn coordinates configured, skipping popup handler")
         
-        # ─────────────────────────────────────────────────────────────────────
+        # ═══════════════════════════════════════════════════════════════════════
         # WORKFLOW COMPLETE
-        # ─────────────────────────────────────────────────────────────────────
+        # ═══════════════════════════════════════════════════════════════════════
         print("\n" + "=" * 60)
-        print("Report Retrieval Workflow completed successfully!")
-        print(f"Report '{target_code}' should now be opening.")
+        print("Hierarchy Search & Retrieval completed successfully!")
+        print(f"  Category: {cat_term} -> Report: {rep_term}")
+        print("  Report should now be opening.")
         print("=" * 60)
         
         return True
@@ -501,16 +528,16 @@ def main():
             return
         
         print("\n" + "=" * 50)
-        print("Login completed. Starting report retrieval...")
+        print("Login completed. Starting hierarchy search...")
         print("=" * 50)
         
-        # Execute the report retrieval workflow (Module 3)
-        if not automator.open_report_workflow():
-            print("Report retrieval failed. Exiting.")
+        # Execute the hierarchy search & retrieval workflow (Module 3)
+        if not automator.search_and_extract():
+            print("Search and extract failed. Exiting.")
             return
         
         # Future extensibility:
-        # automator.open_report_workflow("CUSTOM_CODE")  # Override config
+        # automator.search_and_extract("CUSTOM_CAT", "CUSTOM_RPT")  # Override config
         # automator.download("12345", "C:\\exports\\record.csv")
         
     except pyautogui.FailSafeException:
