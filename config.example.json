@@ -30,5 +30,34 @@
     },
     "failsafe": {
         "enabled": true
+    },
+    "retrieval_task": {
+        "report_code": "CTAMAE",
+        "coords": {
+            "process_dropdown": {
+                "x": 1100,
+                "y": 150
+            },
+            "search_input": {
+                "x": 200,
+                "y": 280
+            },
+            "category_match_1": {
+                "x": 200,
+                "y": 320
+            },
+            "report_grid_row": {
+                "x": 600,
+                "y": 450
+            },
+            "open_emission_btn": {
+                "x": 250,
+                "y": 800
+            },
+            "error_popup_ok": {
+                "x": 960,
+                "y": 540
+            }
+        }
     }
 }
