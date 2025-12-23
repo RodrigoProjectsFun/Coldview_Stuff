@@ -1,71 +1,117 @@
+"""
+Network Folder Watcher with Email Notification
+===============================================
+Monitors a remote network folder for new files and sends email
+notifications via Outlook when files are detected.
+"""
+
 import os
 import time
 import sys
+import json
 
-def watch_network_folder(network_path):
-    # 1. Validate the path exists before starting
-    if not os.path.exists(network_path):
-        print(f"ERROR: The path '{network_path}' cannot be found.")
+# Import our email sender module
+from email_sender import send_email_with_attachment
+
+
+def load_watcher_config(config_path: str = "config.json") -> dict:
+    """Load watcher configuration from config file."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    full_path = os.path.join(script_dir, config_path)
+    
+    with open(full_path, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+    
+    return config.get("watcher", {})
+
+
+def watch_network_folder(network_path: str = None, check_interval: float = None):
+    """
+    Monitor a network folder for new files and send email notifications.
+    
+    Args:
+        network_path: Path to watch (uses config if not provided).
+        check_interval: Seconds between checks (uses config if not provided).
+    """
+    # Load config
+    watcher_config = load_watcher_config()
+    
+    # Use provided values or fallback to config
+    folder_path = network_path or watcher_config.get("network_folder", "")
+    interval = check_interval or watcher_config.get("check_interval_seconds", 2)
+    
+    if not folder_path:
+        print("ERROR: No network folder specified in config or method call.")
+        return
+    
+    # Validate the path exists before starting
+    if not os.path.exists(folder_path):
+        print(f"ERROR: The path '{folder_path}' cannot be found.")
         print("Make sure the network drive is connected/mapped.")
         return
 
-    print(f"--- Monitoring Remote Folder ---")
-    print(f"Target: {network_path}")
+    print("=" * 50)
+    print("Network Folder Watcher with Email Notification")
+    print("=" * 50)
+    print(f"Target: {folder_path}")
+    print(f"Check Interval: {interval}s")
     print("Waiting for new files... (Ctrl+C to stop)\n")
     
     # Initialize the list of known files
     try:
-        before = set(os.listdir(network_path))
+        before = set(os.listdir(folder_path))
+        print(f"Initial file count: {len(before)}")
     except OSError as e:
         print(f"Initial connection failed: {e}")
         return
 
     while True:
         try:
-            time.sleep(2) # Check every 2 seconds
+            time.sleep(interval)
             
             # Get the current list of files
-            after = set(os.listdir(network_path))
+            after = set(os.listdir(folder_path))
             
             # Check for additions
             added = after - before
             
             if added:
-                # Loop through added files (in case multiple were pasted at once)
-                for f in added:
-                    print(f"[NEW] File added: {f}")
+                for filename in added:
+                    full_path = os.path.join(folder_path, filename)
+                    
+                    print(f"\n[NEW] File detected: {filename}")
+                    print("-" * 40)
+                    
+                    # Send email with the new file attached
+                    success = send_email_with_attachment(full_path)
+                    
+                    if success:
+                        print(f"[OK] Email notification sent for: {filename}")
+                    else:
+                        print(f"[WARN] Email failed for: {filename}")
+                    
+                    print("-" * 40)
             
             # Update the reference list
             before = after
 
         except OSError:
-            # This handles network drops (e.g., VPN disconnect, Server restart)
-            print("(!) Network connection lost. Retrying in 5 seconds...")
+            # Handle network drops (e.g., VPN disconnect, Server restart)
+            print("\n(!) Network connection lost. Retrying in 5 seconds...")
             time.sleep(5)
             
-            # Optional: Try to reconnect logic or just loop
-            if os.path.exists(network_path):
+            if os.path.exists(folder_path):
                 print("(+) Connection restored.")
-                # We reset 'before' to avoid alerting on every existing file again
-                # or we keep it to catch up. Usually, resetting is safer to avoid spam.
                 try:
-                    before = set(os.listdir(network_path))
+                    before = set(os.listdir(folder_path))
                 except:
                     pass
 
         except KeyboardInterrupt:
-            print("\nStopping monitor.")
+            print("\n\nStopping monitor.")
             sys.exit()
 
+
 if __name__ == "__main__":
-    # YOU CAN USE A UNC PATH OR A MAPPED DRIVE LETTER
-    # Example 1: UNC Path (Recommended for servers)
-    remote_folder = r"\\192.168.1.50\SharedDocs\Invoices"
-    
-    # Example 2: Mapped Drive
-    # remote_folder = r"Z:\Invoices"
-
-    # Make sure to update this variable!
-    # remote_folder = r"C:\Users\YourName\Desktop\TestFolder" # for testing locally
-
-    watch_network_folder(remote_folder)
+    # Run the watcher - settings loaded from config.json
+    watch_network_folder()

@@ -64,5 +64,15 @@
             "grid_load_delay": 5.0,
             "popup_delay": 5.0
         }
+    },
+    "watcher": {
+        "network_folder": "\\\\SERVER\\SharedDocs\\Reports",
+        "check_interval_seconds": 2
+    },
+    "email": {
+        "to": "recipient@company.com",
+        "cc": "",
+        "subject_template": "New Report: {filename}",
+        "body_template": "A new report has been generated:\n\nFile: {filename}\nDate: {date}\n\nPlease find the file attached."
     }
 }
