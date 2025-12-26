@@ -85,9 +85,25 @@ def send_email_with_attachment(
         outlook = win32com.client.Dispatch("Outlook.Application")
         mail = outlook.CreateItem(0)  # 0 = MailItem
         
-        mail.To = recipient
+        # Add recipients using Recipients.Add() to avoid error 4096
+        # This properly handles external SMTP addresses
+        for addr in recipient.split(';'):
+            addr = addr.strip()
+            if addr:
+                recip = mail.Recipients.Add(addr)
+                recip.Type = 1  # 1 = olTo
+        
         if cc_list:
-            mail.CC = cc_list
+            for addr in cc_list.split(';'):
+                addr = addr.strip()
+                if addr:
+                    recip = mail.Recipients.Add(addr)
+                    recip.Type = 2  # 2 = olCC
+        
+        # Resolve all recipients (validates addresses)
+        if not mail.Recipients.ResolveAll():
+            print("WARNING: Some recipients could not be resolved. Attempting to send anyway...")
+        
         mail.Subject = email_subject
         mail.Body = email_body
         
