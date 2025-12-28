@@ -1,4 +1,0 @@
-pyautogui
-pywin32
-keyboard
-uiautomation>=0.9.54

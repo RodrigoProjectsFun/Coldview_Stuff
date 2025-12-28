@@ -1,0 +1,12 @@
+{
+    "watch_dir": "C:\\Users\\rodri\\Music\\TARGET",
+    "target_file": "TEST.txt",
+    "dest_dir": "C:\\Users\\rodri\\Music\\DESTINATION",
+    "scheduled_times": [
+        "09:00",
+        "12:00",
+        "17:00",
+        "00:35"
+    ],
+    "run_on_startup": true
+}
