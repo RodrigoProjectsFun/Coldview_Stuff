@@ -1,0 +1,11 @@
+{
+    "watch_dir": "C:\\Path\\To\\Watch\\Directory",
+    "target_file": "filename.csv",
+    "dest_dir": "C:\\Path\\To\\Destination",
+    "scheduled_times": [
+        "09:00",
+        "12:00",
+        "17:00"
+    ],
+    "run_on_startup": true
+}
