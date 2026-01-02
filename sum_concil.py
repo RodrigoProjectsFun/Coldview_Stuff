@@ -2,7 +2,7 @@ import pandas as pd
 import os
 import glob
 
-def generate_relationship_summary():
+def conciliation_breakdown_by_file():
     # --- CONFIGURATION ---
     folder_path = './accounting_files'
     
@@ -10,17 +10,17 @@ def generate_relationship_summary():
     debt_pattern = 'M2D-RECU*.xlsx'
     credit_pattern = 'M6D-DEV*.xlsx'
     
-    # Keys
+    # Column Headers
     col_card = 'Card'               
     col_op = 'Operation Number'
-    col_amount = 'Original Amount' # Amount column name in BOTH files
+    col_amount = 'Original Amount' 
     
-    output_file = 'CONCILIATION_SUMMARY_VIEW.xlsx'
+    output_file = 'CONCILIATION_SUBTOTALS_REPORT.xlsx'
     # ---------------------
 
     print(f"Scanning {folder_path}...")
 
-    # --- 1. LOADER ---
+    # --- 1. LOAD & CLEAN DATA ---
     def load_pile(pattern, label):
         files = glob.glob(os.path.join(folder_path, pattern))
         all_dfs = []
@@ -29,33 +29,35 @@ def generate_relationship_summary():
                 df = pd.read_excel(f, dtype=str)
                 df['Origin_File'] = os.path.basename(f)
                 
-                # Standardize columns
-                df[col_card] = df[col_card].str.strip()
-                df[col_op] = df[col_op].str.strip()
+                # Standardize Keys
+                if col_card in df.columns and col_op in df.columns:
+                    df[col_card] = df[col_card].str.strip()
+                    df[col_op] = df[col_op].str.strip()
                 
-                # Clean Amount (remove $ or ,)
+                # Clean Amount (Convert "$1,000.00" -> 1000.00)
                 if col_amount in df.columns:
-                    df[col_amount] = df[col_amount].str.replace('$', '', regex=False)
-                    df[col_amount] = df[col_amount].str.replace(',', '', regex=False)
-                    df['Amt_Float'] = pd.to_numeric(df[col_amount], errors='coerce').fillna(0)
-                
-                all_dfs.append(df)
+                    # Remove non-numeric chars except dot and minus
+                    clean_amt = df[col_amount].astype(str).str.replace(r'[^\d.-]', '', regex=True)
+                    df['Amt_Float'] = pd.to_numeric(clean_amt, errors='coerce').fillna(0)
+                    all_dfs.append(df)
+                else:
+                    print(f"Skipping {os.path.basename(f)} - Missing Amount column")
+                    
             except Exception as e:
-                print(f"Skipping {os.path.basename(f)}: {e}")
+                print(f"Error reading {os.path.basename(f)}: {e}")
         
         return pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
-    # Load Data
-    print("Loading all files...")
+    print("Loading Files...")
     df_debt = load_pile(debt_pattern, "Debt")
     df_credit = load_pile(credit_pattern, "Credit")
 
     if df_debt.empty or df_credit.empty:
-        print("Missing files. Cannot proceed.")
+        print("Error: Missing file data.")
         return
 
-    # --- 2. MERGE ---
-    print("Finding relationships...")
+    # --- 2. MATCHING (INNER JOIN) ---
+    print("Matching Transactions...")
     merged = pd.merge(
         df_debt, 
         df_credit, 
@@ -68,50 +70,40 @@ def generate_relationship_summary():
         print("No matches found.")
         return
 
-    # --- 3. CREATE SUMMARIES ---
-    
-    # Helper to format the list of files nicely
-    def join_files(file_list):
-        return " AND ".join(sorted(file_list.unique()))
+    # --- 3. GENERATE BREAKDOWNS ---
+    print("Calculating Subtotals...")
 
-    print("Summarizing Debt Side...")
-    # Group by Debt File -> See which Credit Files it touched
-    debt_summary = merged.groupby('Origin_File_DEBT').agg(
-        Total_Matches=('Origin_File_CREDIT', 'count'),
-        Total_Amount_Conciliated=('Amt_Float_DEBT', 'sum'),
-        Matched_With_Credit_Files=('Origin_File_CREDIT', join_files)
-    ).reset_index()
-
-    print("Summarizing Credit Side...")
-    # Group by Credit File -> See which Debt Files it touched
-    # Note: On the credit side, we sum the CREDIT amount, but we must deduplicate first 
-    # if one credit row matched multiple debt rows (to avoid inflating the credit total).
-    
-    # Create a unique list of credit rows that were used
-    unique_credits_used = merged.drop_duplicates(subset=['Origin_File_CREDIT', col_card, col_op])
-    
-    # First aggregation: Amounts and Counts
-    credit_stats = unique_credits_used.groupby('Origin_File_CREDIT').agg(
-        Total_Amount_Conciliated=('Amt_Float_CREDIT', 'sum')
-    ).reset_index()
-
-    # Second aggregation: The file relationships (needs the full merge to see all connections)
-    credit_relations = merged.groupby('Origin_File_CREDIT').agg(
-        Total_Matches=('Origin_File_DEBT', 'count'),
-        Matched_With_Debt_Files=('Origin_File_DEBT', join_files)
+    # VIEW 1: DEBT PERSPECTIVE
+    # "For this Debt File, where did the money come from?"
+    # Group by Debt File + Credit File to separate the subtotals
+    debt_breakdown = merged.groupby(['Origin_File_DEBT', 'Origin_File_CREDIT']).agg(
+        Count_Matches=('Operation Number', 'count'),
+        Subtotal_Amount=('Amt_Float_DEBT', 'sum') # Summing the Debt we cleared
     ).reset_index()
     
-    # Combine stats and relations
-    credit_summary = pd.merge(credit_stats, credit_relations, on='Origin_File_CREDIT')
+    # Sort for readability
+    debt_breakdown = debt_breakdown.sort_values(['Origin_File_DEBT', 'Origin_File_CREDIT'])
+
+
+    # VIEW 2: CREDIT PERSPECTIVE
+    # "For this Credit File, which Debt Files did it pay off?"
+    # Group by Credit File + Debt File
+    credit_breakdown = merged.groupby(['Origin_File_CREDIT', 'Origin_File_DEBT']).agg(
+        Count_Matches=('Operation Number', 'count'),
+        Subtotal_Amount=('Amt_Float_DEBT', 'sum') # We sum Debt amount here to see "Value of Debt Covered"
+    ).reset_index()
+
+    # Sort
+    credit_breakdown = credit_breakdown.sort_values(['Origin_File_CREDIT', 'Origin_File_DEBT'])
+
 
     # --- 4. EXPORT ---
+    print(f"Exporting to {output_file}...")
     with pd.ExcelWriter(output_file) as writer:
-        debt_summary.to_excel(writer, sheet_name='DEBT_View (M2D)', index=False)
-        credit_summary.to_excel(writer, sheet_name='CREDIT_View (M6D)', index=False)
+        debt_breakdown.to_excel(writer, sheet_name='DEBT_Breakdown', index=False)
+        credit_breakdown.to_excel(writer, sheet_name='CREDIT_Breakdown', index=False)
 
-    print("------------------------------------------------")
-    print(f"Report Generated: {output_file}")
-    print("------------------------------------------------")
+    print("Done.")
 
 if __name__ == "__main__":
-    generate_relationship_summary()
+    conciliation_breakdown_by_file()
