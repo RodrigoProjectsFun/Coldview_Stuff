@@ -57,6 +57,20 @@ def robust_conciliation_duplicates_allowed():
                 # Load as String to protect IDs from scientific notation
                 df = pd.read_excel(f, dtype=str)
                 
+                # Drop empty rows (trailing rows Excel includes beyond actual data)
+                # A valid row MUST have both Card and Operation Number
+                if col_card in df.columns and col_op in df.columns:
+                    # Replace empty strings/whitespace with NaN for proper dropna
+                    df[col_card] = df[col_card].replace(r'^\s*$', pd.NA, regex=True)
+                    df[col_op] = df[col_op].replace(r'^\s*$', pd.NA, regex=True)
+                    
+                    # Drop rows where BOTH key columns are empty (these are trailing rows)
+                    rows_before = len(df)
+                    df = df.dropna(subset=[col_card, col_op], how='all')
+                    rows_dropped = rows_before - len(df)
+                    if rows_dropped > 0:
+                        print(f"  [INFO] {os.path.basename(f)}: Dropped {rows_dropped} empty trailing rows")
+                
                 # Create Standardized Reference Name
                 std_name = get_standardized_name(f)
                 df['Accounting_Ref'] = std_name
