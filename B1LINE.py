@@ -234,8 +234,8 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
                 pending_record = None
                 continue
 
-            # PATTERN 2: Line 1 - Transaction Data (Starts with digit)
-            if line[0].isdigit() and current_card_info is not None:
+            # PATTERN 2: Line 1 - Transaction Data (Starts with digit after stripping)
+            if stripped_line and stripped_line[0].isdigit() and current_card_info is not None:
                 debug_counts['line1'] += 1
                 if parsing_mode == 'fixed':
                     fields = extract_fixed_width(line, line1_fields)
