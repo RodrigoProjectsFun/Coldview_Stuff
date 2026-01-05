@@ -5,6 +5,8 @@ import os
 from datetime import datetime, timedelta
 from tqdm import tqdm
 
+# Standard input filename
+INPUT_FILENAME = 'reporte.txt'
 # =============================================================================
 # FIELD CONFIGURATION
 # Define the character positions (start, end) for each field in fixed-width format.
@@ -275,17 +277,27 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
     return len(data_rows)
 
 
-def run(input_file, output_dir=None):
+def run(input_file=None, output_dir=None):
     """
-    Convenience function to parse a report with auto-generated output filename.
+    Parse a report with auto-generated output filename.
     
     Args:
-        input_file: Path to the input text file
-        output_dir: Optional output directory (defaults to current directory)
+        input_file: Path to input file. If None, looks for reporte.txt in script directory.
+        output_dir: Optional output directory (defaults to script directory)
     
     Returns:
-        Tuple of (output_path, record_count)
+        Tuple of (output_path, record_count) or (None, 0) if input not found
     """
+    # Default to reporte.txt in script directory
+    if input_file is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        input_file = os.path.join(script_dir, INPUT_FILENAME)
+    
+    # Check if input exists
+    if not os.path.exists(input_file):
+        print(f"Input file not found: {input_file}")
+        return None, 0
+    
     output_path = generate_output_filename(output_dir)
     record_count = parse_cobol_dynamic(input_file, output_path)
     return output_path, record_count
@@ -293,7 +305,5 @@ def run(input_file, output_dir=None):
 
 # --- RUN THE SCRIPT ---
 if __name__ == "__main__":
-    # Example usage:
-    # run('large_report.txt')  # Auto-generates filename with last business day
-    # parse_cobol_dynamic('input.txt', 'custom_output.xlsx')  # Custom filename
-    pass
+    # Auto-run: looks for reporte.txt in script directory
+    run()
