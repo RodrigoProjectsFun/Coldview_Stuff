@@ -1,6 +1,8 @@
 import pandas as pd
 import re
 import time
+import os
+from datetime import datetime, timedelta
 from tqdm import tqdm
 
 # =============================================================================
@@ -12,44 +14,79 @@ from tqdm import tqdm
 
 FIELD_CONFIG = {
     # Set parsing mode: 'fixed' for fixed-width, 'delimiter' for space-delimited
-    'parsing_mode': 'delimiter',  # Change to 'fixed' when you know the exact positions
+    'parsing_mode': 'fixed',  # Fixed-width is more reliable for COBOL reports
     
     # Delimiter pattern (used when parsing_mode='delimiter')
     'delimiter_pattern': r'\s{2,}',  # 2+ spaces
     
     # Line 1 fields: (start_col, end_col) - 0-indexed, end is exclusive
-    # These are EXAMPLE positions - adjust based on actual production data
+    # Column positions verified against sample data
+    # Pattern: MONEDA then IMPORTE for each section
     'line1_fields': {
         'OPERAC':           (0, 6),
         'RS':               (8, 10),
         'MOVIM':            (12, 17),
-        'IMPORTE ORIGINAL': (18, 32),
-        'MONEDA':           (33, 36),
-        'IMPORT VISA':      (38, 52),
-        'IMPORTE AFECTADO': (53, 67),
-        'CUENTA AFECTADA':  (68, 88),
-        'FECOPE':           (90, 98),
-        'HORA':             (99, 105),
-        'FBASE1':           (106, 114),
-        'EXPIRACION':       (115, 120),
+        # ORIGINAL section: 604 (moneda) then 23.00 (importe)
+        'MONEDA ORIGINAL':  (19, 22),       # 604
+        'IMPORTE ORIGINAL': (22, 37),       # 23.00
+        # VISA section: SOL (moneda) then 23.00 (importe)
+        'MONEDA VISA':      (37, 40),       # SOL
+        'IMPORT VISA':      (40, 55),       # 23.00
+        # AFECTADO section: SOL (moneda) then 23.00 (importe)
+        'MONEDA AFECTADO':  (55, 58),       # SOL
+        'IMPORTE AFECTADO': (58, 73),       # 23.00
+        # Account type and number: AHO (tipo) then 194-36830982-0-10
+        'TIPO CUENTA':      (73, 77),       # AHO
+        'CUENTA AFECTADA':  (77, 97),       # 194-36830982-0-10
+        # Dates: 14062025, 234248, 14062025, 06-27
+        'FECOPE':           (97, 106),
+        'HORA':             (106, 113),
+        'FBASE1':           (113, 122),
+        'EXPIRACION':       (122, 128),
     },
     
     # Line 2 fields: (start_col, end_col) - 0-indexed, end is exclusive
     'line2_fields': {
-        'TERMINAL':       (0, 10),
-        'TIPO':           (10, 15),
-        'IDENTIFICACION': (16, 22),
-        'ESTABLECIMIENTO':(23, 53),
-        'CIUDAD':         (54, 68),
-        'PAIS':           (69, 71),
-        'BIN ADQUIR.':    (73, 79),
-        'PIN':            (81, 83),
-        'VIS.REFER':      (85, 97),
-        'TRNX':           (98, 100),
-        'CAVV':           (101, 103),
-        'POS.C.CODE':     (104, 120),
+        'TERMINAL':       (0, 12),
+        'TIPO':           (12, 17),
+        'IDENTIFICACION': (17, 32),
+        'ESTABLECIMIENTO':(32, 58),
+        'CIUDAD':         (58, 72),
+        'PAIS':           (72, 78),
+        'BIN ADQUIR.':    (78, 91),
+        'PIN':            (91, 96),
+        'VIS.REFER':      (96, 108),
+        'TRNX':           (108, 113),
+        'CAVV':           (113, 119),
+        'POS.C.CODE':     (119, 140),
     },
 }
+
+
+def get_last_business_day():
+    """Get the last business day (Monday-Friday), skipping weekends."""
+    today = datetime.now()
+    offset = 1
+    # If today is Monday, go back to Friday (3 days)
+    if today.weekday() == 0:  # Monday
+        offset = 3
+    # If today is Sunday, go back to Friday (2 days)
+    elif today.weekday() == 6:  # Sunday
+        offset = 2
+    return today - timedelta(days=offset)
+
+
+def generate_output_filename(output_dir=None):
+    """
+    Generate the standard output filename with last business day date.
+    Format: BASE 1 PENDIENTES DE CONCILIAR LINEALIZADO (DD-MM-YYYY).xlsx
+    """
+    last_bday = get_last_business_day()
+    date_str = last_bday.strftime("%d-%m-%Y")
+    filename = f"BASE 1 PENDIENTES DE CONCILIAR LINEALIZADO ({date_str}).xlsx"
+    if output_dir:
+        return os.path.join(output_dir, filename)
+    return filename
 
 
 def count_lines(file_path):
@@ -74,6 +111,39 @@ def extract_delimiter(line, field_names, delimiter_pattern):
     parts = delimiter_pattern.split(line.strip())
     safe_parts = parts + [""] * (len(field_names) - len(parts))
     return {name: safe_parts[i] for i, name in enumerate(field_names)}
+
+
+# Fields that should be converted to numeric values
+IMPORTE_FIELDS = ['IMPORTE ORIGINAL', 'IMPORT VISA', 'IMPORTE AFECTADO']
+
+
+def parse_importe(value):
+    """
+    Convert IMPORTE string to numeric value.
+    Handles empty strings, whitespace, and various number formats.
+    """
+    if not value or not value.strip():
+        return None
+    
+    cleaned = value.strip()
+    # Remove any non-numeric characters except . and -
+    cleaned = ''.join(c for c in cleaned if c.isdigit() or c in '.-')
+    
+    if not cleaned:
+        return None
+    
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def clean_record(record):
+    """Clean a record by converting IMPORTE fields to numeric."""
+    for field in IMPORTE_FIELDS:
+        if field in record:
+            record[field] = parse_importe(record[field])
+    return record
 
 
 def parse_cobol_dynamic(file_path, output_path, config=None):
@@ -179,7 +249,7 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
                     fields = extract_delimiter(stripped_line, line2_names, delimiter_pattern)
                 
                 pending_record.update(fields)
-                data_rows.append(pending_record)
+                data_rows.append(clean_record(pending_record))
                 pending_record = None
                 continue
 
@@ -205,8 +275,25 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
     return len(data_rows)
 
 
+def run(input_file, output_dir=None):
+    """
+    Convenience function to parse a report with auto-generated output filename.
+    
+    Args:
+        input_file: Path to the input text file
+        output_dir: Optional output directory (defaults to current directory)
+    
+    Returns:
+        Tuple of (output_path, record_count)
+    """
+    output_path = generate_output_filename(output_dir)
+    record_count = parse_cobol_dynamic(input_file, output_path)
+    return output_path, record_count
+
+
 # --- RUN THE SCRIPT ---
 if __name__ == "__main__":
     # Example usage:
-    # parse_cobol_dynamic('large_report.txt', 'output.xlsx')
+    # run('large_report.txt')  # Auto-generates filename with last business day
+    # parse_cobol_dynamic('input.txt', 'custom_output.xlsx')  # Custom filename
     pass
