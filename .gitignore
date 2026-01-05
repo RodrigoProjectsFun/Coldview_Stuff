@@ -24,3 +24,9 @@ config.json
 # OS files
 .DS_Store
 Thumbs.db
+
+#Test Data
+Report Description.txt
+
+#Test Output  
+test_output.xlsx
