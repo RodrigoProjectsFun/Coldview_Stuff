@@ -156,6 +156,7 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
         file_path: Input text file path
         output_path: Output Excel file path
         config: Optional field configuration dict (uses FIELD_CONFIG if None)
+        debug: If True, print debug info about what's being parsed
     """
     if config is None:
         config = FIELD_CONFIG
@@ -172,6 +173,9 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
     line2_fields = config.get('line2_fields', {})
     line1_names = list(line1_fields.keys())
     line2_names = list(line2_fields.keys())
+    
+    # Debug counters
+    debug_counts = {'tarjeta': 0, 'line1': 0, 'line2': 0, 'skipped': 0}
     
     data_rows = []
     
@@ -212,6 +216,7 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
             
             # PATTERN 1: Card Header (- TARJETA)
             if stripped_line.startswith("- TARJETA"):
+                debug_counts['tarjeta'] += 1
                 content = stripped_line.replace("- TARJETA", "").strip()
                 parts = delimiter_pattern.split(content)
                 
@@ -231,6 +236,7 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
 
             # PATTERN 2: Line 1 - Transaction Data (Starts with digit)
             if line[0].isdigit() and current_card_info is not None:
+                debug_counts['line1'] += 1
                 if parsing_mode == 'fixed':
                     fields = extract_fixed_width(line, line1_fields)
                 else:
@@ -245,6 +251,7 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
             
             # PATTERN 3: Line 2 - Terminal/Merchant Info (Starts with space)
             if line.startswith(" ") and pending_record is not None:
+                debug_counts['line2'] += 1
                 if parsing_mode == 'fixed':
                     fields = extract_fixed_width(line, line2_fields)
                 else:
@@ -256,7 +263,8 @@ def parse_cobol_dynamic(file_path, output_path, config=None):
                 continue
 
     # --- WRITING PHASE ---
-    print(f"\nParsing complete. Found {len(data_rows):,} records.")
+    print(f"\nDebug: TARJETA={debug_counts['tarjeta']}, Line1={debug_counts['line1']}, Line2={debug_counts['line2']}")
+    print(f"Parsing complete. Found {len(data_rows):,} records.")
     
     if data_rows:
         print("Writing Excel...")
