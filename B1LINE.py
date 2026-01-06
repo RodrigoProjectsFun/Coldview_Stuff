@@ -77,6 +77,71 @@ def clean_importe(series):
     cleaned = series.astype(str).str.replace(r'[^\d.-]', '', regex=True)
     return pd.to_numeric(cleaned, errors='coerce')
 
+def get_page_skip_mask(df):
+    """
+    Generate a boolean mask for lines to skip based on the legacy state machine.
+    
+    Logic:
+    - ENTER skip mode when line contains "*****".
+    - EXIT skip mode when 2nd "-----" line is seen after entering.
+    """
+    # 1. Identify Event Locations
+    # Using specific markers from legacy logic
+    star_idxs = df.index[df['stripped'].str.contains(r'\*{5,}', regex=True)].tolist()
+    dash_idxs = df.index[df['stripped'].str.contains(r'-{5,}', regex=True)].tolist()
+    
+    # Combined events: (index, type)
+    events = sorted(
+        [(i, 'STAR') for i in star_idxs] + 
+        [(i, 'DASH') for i in dash_idxs]
+    )
+    
+    skip_mask = np.zeros(len(df), dtype=bool)
+    
+    if not events:
+        return skip_mask
+
+    # 2. Process Events to build ranges
+    current_start = -1
+    in_skip_mode = False
+    dash_count = 0
+    
+    exclusion_ranges = []
+    
+    for idx, event_type in events:
+        if event_type == 'STAR':
+            # Always reset / start skipping on STAR
+            # If we were already skipping, we just reset the start point effectively 
+            # (though practically simpler to just treat as start of new block or continuation)
+            if not in_skip_mode:
+                in_skip_mode = True
+                current_start = idx
+            else:
+                # Re-trigger: Reset dash count logic, but we are already skipping from previous start
+                # Legacy code: "dash_lines_seen = 0"
+                dash_count = 0
+                
+        elif event_type == 'DASH':
+            if in_skip_mode:
+                dash_count += 1
+                if dash_count >= 2:
+                    in_skip_mode = False
+                    # End skipping at this line (inclusive)
+                    exclusion_ranges.append((current_start, idx))
+                    current_start = -1
+                    dash_count = 0
+
+    # Handle case where file ends while skipping
+    if in_skip_mode and current_start != -1:
+        exclusion_ranges.append((current_start, len(df) - 1))
+
+    # 3. Fill Mask
+    for start, end in exclusion_ranges:
+        skip_mask[start : end + 1] = True
+        
+    return skip_mask
+
+
 def parse_cobol_vectorized(file_path, output_path):
     print(f"Processing {file_path}...")
     start_time = time.time()
@@ -86,6 +151,7 @@ def parse_cobol_vectorized(file_path, output_path):
     try:
         # engine='c' is faster. sep='\0' or similar avoids splitting. 
         # quoting=3 (csv.QUOTE_NONE) ensures no quoting logic runs.
+        # encoding='utf-8-sig' handles BOM (ï»¿) automatically
         df = pd.read_csv(
             file_path, 
             header=None, 
@@ -93,12 +159,12 @@ def parse_cobol_vectorized(file_path, output_path):
             sep='\0', 
             quoting=3, 
             engine='c', 
-            encoding='utf-8', 
+            encoding='utf-8-sig', 
             encoding_errors='replace'
         )
     except Exception:
         # Fallback for systems where read_csv might behave differently on text files
-        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(file_path, 'r', encoding='utf-8-sig', errors='replace') as f:
             lines = f.readlines()
         df = pd.DataFrame(lines, columns=['raw'])
         df['raw'] = df['raw'].str.rstrip('\n\r')
@@ -106,8 +172,6 @@ def parse_cobol_vectorized(file_path, output_path):
     print(f"Loaded {len(df):,} lines.")
 
     # 2. Identify Metadata Rows and Structure
-    
-    # Pre-calculate stripped version for pattern matching
     df['stripped'] = df['raw'].str.strip()
     
     # Identify Card Headers
@@ -116,37 +180,37 @@ def parse_cobol_vectorized(file_path, output_path):
     # Identify Separators / Metadata to exclude
     is_separator = df['stripped'].str.contains(r'^\*+|^-+$', regex=True)
     is_empty = df['stripped'] == ''
+
+    # BLOCK-BASED FILTERING (Replaces regex)
+    is_page_header = get_page_skip_mask(df)
     
     # 3. Extract Card Info
-    # Format: "- TARJETA <card> ... " (some variations exist, use regex)
-    # This extract creates a DataFrame with columns TARJETA, NOMBRE
     card_info_df = df.loc[is_card, 'raw'].str.extract(
         r'- TARJETA\s+(?P<TARJETA>\S+).*?NOMBRE\s+(?P<NOMBRE>.*)'
     )
     
-    # Initialize columns in main df
     df['TARJETA'] = np.nan
     df['NOMBRE'] = np.nan
     
-    # Fill in the extracted values at the card header rows
     if not card_info_df.empty:
         df.loc[is_card, ['TARJETA', 'NOMBRE']] = card_info_df.values
     
-    # Forward fill to propagate card info to transaction lines below
     df[['TARJETA', 'NOMBRE']] = df[['TARJETA', 'NOMBRE']].ffill()
 
     # 4. Filter Data Rows
     # A generic data row is one that:
     #   - Has card info (TARJETA is not null)
+    #   - Is not inside a Page Header block
     #   - Is not a card header itself
     #   - Is not a separator or empty line
-    mask_candidates = (~is_card) & (~is_separator) & (~is_empty) & (df['TARJETA'].notna())
+    mask_candidates = (~is_card) & (~is_separator) & (~is_empty) & (~is_page_header) & (df['TARJETA'].notna())
     candidates = df[mask_candidates].copy()
+    
     
     if candidates.empty:
         print("Warning: No data rows found.")
         return 0
-
+    
     # 5. Split into Pairs (Line 1 / Line 2)
     # Logic: The file format strictly alternates Line 1 / Line 2 for transactions.
     # Line 1 usually starts with a digit/code. Line 2 contains Terminal/Establecimiento.
@@ -226,4 +290,6 @@ def run(input_file=None, output_dir=None):
 
 # --- RUN THE SCRIPT ---
 if __name__ == "__main__":
-    run()
+    import sys
+    input_arg = sys.argv[1] if len(sys.argv) > 1 else None
+    run(input_arg)

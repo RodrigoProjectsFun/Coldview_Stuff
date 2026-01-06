@@ -27,6 +27,10 @@ Thumbs.db
 
 #Test Data
 Report Description.txt
+Reporte.txt
+debug_count.txt
+debug_missing.py
+count_check.py
 
 #Test Output  
 test_output.xlsx

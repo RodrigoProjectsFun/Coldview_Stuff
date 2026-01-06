@@ -20,6 +20,10 @@ def mass_conciliation():
 
     print(f"Scanning folder: {folder_path} ...")
 
+    # Trackers for file status
+    skipped_files = [] 
+    error_files = []
+
     # Helper function to load multiple files into one DataFrame
     def load_files(pattern, file_type_label):
         search_path = os.path.join(folder_path, pattern)
@@ -33,12 +37,13 @@ def mass_conciliation():
         print(f"Found {len(files)} {file_type_label} files. Loading...")
         
         for file in files:
+            file_base = os.path.basename(file)
             try:
                 # dtype=str is crucial to prevent losing leading zeros in card numbers
                 df = pd.read_excel(file, dtype=str)
                 
                 # Add a column so we know exactly which file this row came from
-                df['Origin_File'] = os.path.basename(file)
+                df['Origin_File'] = file_base
                 
                 # Clean keys immediately
                 if col_card in df.columns and col_op in df.columns:
@@ -46,9 +51,13 @@ def mass_conciliation():
                     df[col_op] = df[col_op].str.strip()
                     all_data.append(df)
                 else:
-                    print(f"  [Skipping] {os.path.basename(file)} - Missing required columns.")
+                    msg = "Missing required columns."
+                    print(f"  [Skipping] {file_base} - {msg}")
+                    skipped_files.append((file_base, msg))
             except Exception as e:
-                print(f"  [Error] Could not read {os.path.basename(file)}: {e}")
+                msg = str(e)
+                print(f"  [Error] Could not read {file_base}: {msg}")
+                error_files.append((file_base, msg))
 
         if all_data:
             return pd.concat(all_data, ignore_index=True)
@@ -63,6 +72,23 @@ def mass_conciliation():
     
     print("--- Loading Credit Notes (M6D) ---")
     master_credit = load_files(credit_pattern, "Credit")
+
+    # --- ERROR REPORTING ---
+    if error_files or skipped_files:
+        print("\n" + "="*50)
+        print("CRITICAL FILES REPORT (CHECK THESE)")
+        print("="*50)
+        
+        if error_files:
+            print(f"\n[CRITICAL ERRORS] ({len(error_files)} files):")
+            for fname, err in error_files:
+                print(f"  - {fname}: {err}")
+                
+        if skipped_files:
+            print(f"\n[SKIPPED FILES] ({len(skipped_files)} files):")
+            for fname, reason in skipped_files:
+                print(f"  - {fname}: {reason}")
+        print("="*50 + "\n")
 
     if master_debt.empty or master_credit.empty:
         print("Error: One of the file lists is empty. Cannot conciliate.")
