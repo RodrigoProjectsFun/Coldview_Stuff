@@ -124,9 +124,8 @@ Sub ParseReport()
             pendingLine1 = line
             hasPendingLine1 = True
             
-            ' Calculate Indentation (Coupling Logic)
-            ' Count leading spaces
-            indentLen = Len(line) - Len(LTrim(line))
+            ' Calculate Indentation (Coupling Logic with Empty OPERAC support)
+            indentLen = GetSmartIndent(line)
         Else
             ' This is LINE 2
             rawL1 = pendingLine1
@@ -135,7 +134,11 @@ Sub ParseReport()
             ' Apply Indentation Logic
             ' Strip exact same indent from Line 2 as Line 1
             ' Mid is 1-based. Start at indentLen + 1
-            cleanL1 = Mid(rawL1, indentLen + 1)
+            If indentLen < Len(rawL1) Then
+                cleanL1 = Mid(rawL1, indentLen + 1)
+            Else
+                cleanL1 = "" 
+            End If
             
             Dim cleanL2 As String
             If Len(rawL2) > indentLen Then
@@ -150,7 +153,15 @@ Sub ParseReport()
             ' Python (8,10) -> VBA Mid(cleanL1, 9, 2)
             rsVal = Trim(Mid(cleanL1, 9, 2))
             
-            If IsNumeric(rsVal) Then
+            ' Enhanced Validation: Check RS is numeric AND Moneda is NOT numeric (prevents shifting)
+            Dim isMonedaValid As Boolean
+            Dim monCheck As String
+            monCheck = Mid(cleanL1, 20, 3)
+            ' Moneda should be Alpha (USD, EUR) -> Not Numeric. 
+            ' If shifted to Importe, it would be Numeric.
+            isMonedaValid = Not IsNumeric(monCheck)
+            
+            If IsNumeric(rsVal) And isMonedaValid Then
                 ' Valid Record, Parse and Store
                 outRow = outRow + 1
                 If outRow > arrSize Then
@@ -233,4 +244,68 @@ Function CleanImporte(val As String) As String
     Else
         CleanImporte = res
     End If
+End Function
+
+' ==================================================================================
+' Helper Functions for Indentation & Alignment
+' ==================================================================================
+
+Function GetSmartIndent(line As String) As Long
+    ' Determines indentation by validating data field alignment
+    ' Handles cases where the first field (OPERAC) might be empty/spaces
+    
+    Dim rawIndent As Long
+    Dim testStr As String
+    
+    rawIndent = Len(line) - Len(LTrim(line))
+    
+    ' Strategy 1: Trust LTrim (Standard Case: OPERAC is present)
+    If Len(line) > rawIndent Then
+        testStr = Mid(line, rawIndent + 1)
+        If IsLineAligned(testStr) Then
+            GetSmartIndent = rawIndent
+            Exit Function
+        End If
+    End If
+    
+    ' Strategy 2: Assume Empty OPERAC (Length 6)
+    ' If OPERAC is empty, LTrim consumes its spaces (6 chars).
+    ' We need to back off 6 chars to find the true start.
+    If rawIndent >= 6 Then
+        testStr = Mid(line, rawIndent - 6 + 1)
+        If IsLineAligned(testStr) Then
+            GetSmartIndent = rawIndent - 6
+            Exit Function
+        End If
+    End If
+    
+    ' Default: Return rawIndent (Validation will likely fail later if invalid)
+    GetSmartIndent = rawIndent
+End Function
+
+Function IsLineAligned(dat As String) As Boolean
+    ' Heuristics to validate alignment
+    ' 1. Check RS (Values at Pos 9-10) -> Must be Numeric
+    ' 2. Check MONEDA (Values at Pos 20-22) -> Should NOT be Numeric (e.g. USD, EUR)
+    
+    If Len(dat) < 22 Then 
+        IsLineAligned = False
+        Exit Function
+    End If
+    
+    ' Check RS (Offset 8 in 0-based words, 9 in 1-based VBA)
+    If Not IsNumeric(Mid(dat, 9, 2)) Then 
+        IsLineAligned = False
+        Exit Function
+    End If
+    
+    ' Check Moneda (Offset 19 in 0-based words, 20 in 1-based VBA)
+    ' If we are shifted (OPERAC consumed), this falls on IMPORTE integers -> Numeric
+    ' If aligned, this is Currency Code -> Alpha -> Not Numeric
+    If IsNumeric(Mid(dat, 20, 3)) Then 
+        IsLineAligned = False
+        Exit Function
+    End If
+    
+    IsLineAligned = True
 End Function
