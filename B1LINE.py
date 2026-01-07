@@ -242,6 +242,17 @@ def parse_cobol_vectorized(file_path, output_path):
 
     extracted_l1 = extract_fields(line1_df, FIELD_CONFIG['line1_fields'])
     extracted_l2 = extract_fields(line2_df, FIELD_CONFIG['line2_fields'])
+
+    # Validation: Filter invalid RS
+    # RS must be numeric. If it's not, it's likely a parsing artifact (e.g. alignment issue).
+    if 'RS' in extracted_l1.columns:
+        valid_rs = pd.to_numeric(extracted_l1['RS'], errors='coerce').notna()
+        n_dropped = (~valid_rs).sum()
+        if n_dropped > 0:
+            print(f"Warning: Dropped {n_dropped} records with invalid (non-numeric) RS values.")
+            extracted_l1 = extracted_l1[valid_rs]
+            extracted_l2 = extracted_l2[valid_rs]
+            line1_df = line1_df[valid_rs]
     
     # 7. Concatenate Final DataFrame
     final_df = pd.concat([
