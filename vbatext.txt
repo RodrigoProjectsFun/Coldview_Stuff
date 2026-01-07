@@ -1,15 +1,33 @@
 Sub RunParsingScript()
     Dim objShell As Object
     Dim pythonScript As String, pythonExe As String
+    Dim command As String
     
-    ' Update these paths!
-    pythonExe = "python"  ' Or full path like "C:\Python39\python.exe"
+    ' --- CONFIGURATION ---
+    ' Path to your Python executable
+    ' Found at: c:\Users\rodri\OneDrive\Desktop\vevenv\Scripts\python.exe
+    pythonExe = "c:\Users\rodri\OneDrive\Desktop\vevenv\Scripts\python.exe"
+    
+    ' Path to your Python script
     pythonScript = "C:\Users\rodri\OneDrive\Documents\ANTIGRAVITY_PROJECTS\crm_automator\B1LINE.py"
-    
+    ' ---------------------
+
     Set objShell = VBA.CreateObject("WScript.Shell")
     
-    ' Run the script and keep window open to see errors
-    objShell.Run "cmd /k " & pythonExe & " """ & pythonScript & """", 1, True
+    ' Verify file existence (Optional safety check)
+    If Dir(pythonScript) = "" Then
+        MsgBox "Error: Script not found at " & pythonScript, vbCritical
+        Exit Sub
+    End If
+
+    ' Build Command
+    ' /k keeps the window open so you can see the parsing results/errors
+    command = "cmd /k """ & pythonExe & """ """ & pythonScript & """"
     
-    MsgBox "Process Completed!", vbInformation
+    ' Run the script
+    ' 1 = vbNormalFocus (Show window)
+    ' True = Wait for completion (so we can show the MsgBox after)
+    objShell.Run command, 1, True
+    
+    MsgBox "Parsing Complete! check the folder for your Excel file.", vbInformation
 End Sub
