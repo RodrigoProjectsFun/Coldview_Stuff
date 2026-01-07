@@ -1,0 +1,15 @@
+Sub RunParsingScript()
+    Dim objShell As Object
+    Dim pythonScript As String, pythonExe As String
+    
+    ' Update these paths!
+    pythonExe = "python"  ' Or full path like "C:\Python39\python.exe"
+    pythonScript = "C:\Users\rodri\OneDrive\Documents\ANTIGRAVITY_PROJECTS\crm_automator\B1LINE.py"
+    
+    Set objShell = VBA.CreateObject("WScript.Shell")
+    
+    ' Run the script and keep window open to see errors
+    objShell.Run "cmd /k " & pythonExe & " """ & pythonScript & """", 1, True
+    
+    MsgBox "Process Completed!", vbInformation
+End Sub
