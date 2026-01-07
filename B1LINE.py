@@ -228,20 +228,46 @@ def parse_cobol_vectorized(file_path, output_path):
     line2_df = candidates.iloc[1::2].reset_index(drop=True)
     
     # 6. Extract Fixed Width Fields
-    def extract_fields(source_df, field_config):
+    def extract_fields(source_df, field_config, clean_raw_series=None):
         extracted = pd.DataFrame(index=source_df.index)
-        # Handle leading whitespace by stripping it before fixed-width extraction
-        # This ensures that even if lines are indented, the indices (0, 6, etc.) apply to the data.
-        cleaned_raw = source_df['raw'].str.lstrip()
         
+        if clean_raw_series is None:
+            # Default behavior: lstrip
+            cleaned_raw = source_df['raw'].str.lstrip()
+        else:
+            cleaned_raw = clean_raw_series
+
         for field, (start, end) in field_config.items():
             # Slice the cleaned string. 
             ext_col = cleaned_raw.str.slice(start, end).str.strip()
             extracted[field] = ext_col
         return extracted
 
-    extracted_l1 = extract_fields(line1_df, FIELD_CONFIG['line1_fields'])
-    extracted_l2 = extract_fields(line2_df, FIELD_CONFIG['line2_fields'])
+    # Calculate Line 1 Indentation
+    # We assume Line 1 indentation is the anchor for the block.
+    line1_len = line1_df['raw'].str.len()
+    line1_clean = line1_df['raw'].str.lstrip()
+    line1_indent_counts = line1_len - line1_clean.str.len()
+    
+    # Process Line 2 using Line 1's indentation
+    # This preserves spaces in Line 2 that are part of the data (e.g. empty TERMINAL)
+    # but removes the 'page margin' defined by Line 1.
+    
+    # Vectorized slicing using list comprehension (fastest for variable slice)
+    # or just simple str handling if fixed width? 
+    # Since indentation might vary per record, we need row-specific slicing.
+    # But wait, pd.Series.str.slice doesn't accept a Series for start.
+    # List comprehension approach:
+    l2_raw = line2_df['raw'].tolist()
+    l1_indents = line1_indent_counts.tolist()
+    
+    # Slice line2 based on line1 indent
+    # Fallback: if L2 is shorter than indent, it becomes empty string.
+    l2_cleaned_list = [s[i:] for s, i in zip(l2_raw, l1_indents)]
+    line2_clean = pd.Series(l2_cleaned_list, index=line2_df.index)
+
+    extracted_l1 = extract_fields(line1_df, FIELD_CONFIG['line1_fields'], clean_raw_series=line1_clean)
+    extracted_l2 = extract_fields(line2_df, FIELD_CONFIG['line2_fields'], clean_raw_series=line2_clean)
 
     # Validation: Filter invalid RS
     # RS must be numeric. If it's not, it's likely a parsing artifact (e.g. alignment issue).
