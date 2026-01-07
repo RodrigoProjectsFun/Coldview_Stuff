@@ -1,0 +1,27 @@
+' =========================================================
+' INSTRUCTIONS FOR USERFORM
+' =========================================================
+' 1. In VBA Editor, go to Insert > UserForm.
+' 2. Drag a CommandButton onto the form (from Toolbox).
+' 3. Double-click the CommandButton to open the code view.
+' 4. Paste the following code into the Sub CommandButton1_Click:
+
+Private Sub CommandButton1_Click()
+    ' Disable the button to prevent double-clicks
+    Me.CommandButton1.Enabled = False
+    Me.Repaint
+    
+    ' Run the parser
+    ' We use On Error to ensure we re-enable the button even if it fails
+    On Error GoTo ErrorHandler
+    
+    Call B1LINEALIZER.ParseReport
+    
+    ' Close the form after success (Optional - remove if you want it to stay open)
+    Unload Me
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "An error occurred: " & Err.Description, vbCritical
+    Me.CommandButton1.Enabled = True
+End Sub
