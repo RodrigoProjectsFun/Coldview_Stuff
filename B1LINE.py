@@ -230,10 +230,14 @@ def parse_cobol_vectorized(file_path, output_path):
     # 6. Extract Fixed Width Fields
     def extract_fields(source_df, field_config):
         extracted = pd.DataFrame(index=source_df.index)
+        # Handle leading whitespace by stripping it before fixed-width extraction
+        # This ensures that even if lines are indented, the indices (0, 6, etc.) apply to the data.
+        cleaned_raw = source_df['raw'].str.lstrip()
+        
         for field, (start, end) in field_config.items():
-            # Slice the 'raw' string. 
-            # Note: Strings might be shorter than 'end', slice handles this gracefully.
-            extracted[field] = source_df['raw'].str.slice(start, end).str.strip()
+            # Slice the cleaned string. 
+            ext_col = cleaned_raw.str.slice(start, end).str.strip()
+            extracted[field] = ext_col
         return extracted
 
     extracted_l1 = extract_fields(line1_df, FIELD_CONFIG['line1_fields'])

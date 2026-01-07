@@ -1,0 +1,61 @@
+************************************************************************************************************************************
+T.T.T. PAG    1 JOB-JTESTDAT PASO-PASOTTT  PGR-TTTTTTTT DD-TTTTTTT -T TTTT. DIASEM    14/06/2035 PROC. DIASEM    18/06/2035 00.54 HS
+************************************************************************************************************************************
+TEST BANK                                                                                                      NOMBRE DE SUADD - ABC
+                                  B I  - TTTTTT. TTTTTT TTTTTTTTTT TTTTTTT T 11 DIAS 14/06/2035
+                                           MONEDA NACIONAL   - OTRA RED LOCAL - P.O.S. 
+------------------------------------------------------------------------------------------------------------------------------------
+OPERAC  RS  MOVIM     IMPORTE ORIGINAL        IMPORT VISA  IMPORTE AFECTADO  CUENTA AFECTADA   FECOPE    HORA   FBASE1  EXPIRACION
+  TERMINAL  TIPO IDENTIFICACION ESTABLECIMIENTO           CIUDAD        PAIS  BIN ADQUIR.  PIN  VIS.REFER   TRNX CAVV  POS.C.CODE
+------------------------------------------------------------------------------------------------------------------------------------            
+- TARJETA 1234567890123456    NOMBRE APELLIDO1 APELLIDO2 NOMBRE1 NOMBRE2
+198771  00  I.N.T  604        23.00  SOL        23.00  SOL        23.00  AHO 194-36830982-0-10   14062025 234248 14062025 06-27
+  3         6012 650036                                   Visa Direct   PE    420829       NO   516523243643  05  NO 59E-COMMMERCE
+198771  00  I.N.T  604        23.00  SOL        23.00  SOL        23.00  AHO 194-36830982-0-10   14062025 234248 14062025 06-27
+  3         6012 650036         PLIN-VANESSA BERROSPI     Visa Direct   PE    420829       NO   516523243643  05  NO 59E-COMMMERCE
+198771  00  I.N.T  604        23.00  SOL        23.00  SOL        23.00  AHO 194-36830982-0-10   14062025 234248 14062025 06-27
+  3         6012 650036         PLIN-VANESSA BERROSPI     Visa Direct   PE    420829       NO   516523243643  05  NO 59E-COMMMERCE
+************************************************************************************************************************************
+T.T.T. PAG    1 JOB-JTESTDAT PASO-PASOTTT  PGR-TTTTTTTT DD-TTTTTTT -T TTTT. DIASEM    14/06/2035 PROC. DIASEM    18/06/2035 00.54 HS
+************************************************************************************************************************************
+TEST BANK                                                                                                      NOMBRE DE SUADD - ABC
+                                  B I  - TTTTTT. TTTTTT TTTTTTTTTT TTTTTTT T 11 DIAS 14/06/2035
+                                           MONEDA NACIONAL   - OTRA RED LOCAL - P.O.S. 
+------------------------------------------------------------------------------------------------------------------------------------
+OPERAC  RS  MOVIM     IMPORTE ORIGINAL        IMPORT VISA  IMPORTE AFECTADO  CUENTA AFECTADA   FECOPE    HORA   FBASE1  EXPIRACION
+  TERMINAL  TIPO IDENTIFICACION ESTABLECIMIENTO           CIUDAD        PAIS  BIN ADQUIR.  PIN  VIS.REFER   TRNX CAVV  POS.C.CODE
+------------------------------------------------------------------------------------------------------------------------------------  
+        00  I.N.T  604        23.00  SOL        23.00  SOL        23.00  AHO 194-36830982-0-10   14062025 234248 14062025 06-27
+  3         6012 650036         PLIN-VANESSA BERROSPI     Visa Direct   PE    420829       NO   516523243643  05  NO 59E-COMMMERCE
+198771  00  I.N.T  604        23.00  SOL        23.00  SOL        23.00  AHO 194-36830982-0-10   14062025 234248 14062025 06-27
+  3         6012 650036         PLIN-VANESSA BERROSPI     Visa Direct   PE    420829       NO   516523243643  05  NO 59E-COMMMERCE
+198771  00  I.N.T  604        23.00  SOL        23.00  SOL        23.00  AHO 194-36830982-0-10   14062025 234248 14062025 06-27
+            6012 650036         PLIN-VANESSA BERROSPI     Visa Direct   PE    420829       NO   516523243643  05  NO 59E-COMMMERCE
+
+- TARJETA 1234567890123456    NOMBRE APELLIDO1 APELLIDO2 NOMBRE1 NOMBRE2
+************************************************************************************************************************************
+T.T.T. PAG    1 JOB-JTESTDAT PASO-PASOTTT  PGR-TTTTTTTT DD-TTTTTTT -T TTTT. DIASEM    14/06/2035 PROC. DIASEM    18/06/2035 00.54 HS
+************************************************************************************************************************************
+TEST BANK                                                                                                      NOMBRE DE SUADD - ABC
+                                  B I  - TTTTTT. TTTTTT TTTTTTTTTT TTTTTTT T 11 DIAS 14/06/2035
+                                           MONEDA NACIONAL   - OTRA RED LOCAL - P.O.S. 
+------------------------------------------------------------------------------------------------------------------------------------
+OPERAC  RS  MOVIM     IMPORTE ORIGINAL        IMPORT VISA  IMPORTE AFECTADO  CUENTA AFECTADA   FECOPE    HORA   FBASE1  EXPIRACION
+  TERMINAL  TIPO IDENTIFICACION ESTABLECIMIENTO           CIUDAD        PAIS  BIN ADQUIR.  PIN  VIS.REFER   TRNX CAVV  POS.C.CODE
+------------------------------------------------------------------------------------------------------------------------------------  
+198771  00  I.N.T  604        23.00  SOL        23.00  SOL        23.00  AHO 194-36830982-0-10   14062025 234248 14062025 06-27
+  3         6012 650036         PLIN-VANESSA BERROSPI     Visa Direct   PE    420829       NO   516523243643  05  NO 59E-COMMMERCE
+************************************************************************************************************************************
+T.T.T. PAG    1 JOB-JTESTDAT PASO-PASOTTT  PGR-TTTTTTTT DD-TTTTTTT -T TTTT. DIASEM    14/06/2035 PROC. DIASEM    18/06/2035 00.54 HS
+************************************************************************************************************************************
+TEST BANK                                                                                                      NOMBRE DE SUADD - ABC
+                                  B I  - TTTTTT. TTTTTT TTTTTTTTTT TTTTTTT T 11 DIAS 14/06/2035
+                                           MONEDA NACIONAL   - OTRA RED LOCAL - P.O.S. 
+------------------------------------------------------------------------------------------------------------------------------------
+OPERAC  RS  MOVIM     IMPORTE ORIGINAL        IMPORT VISA  IMPORTE AFECTADO  CUENTA AFECTADA   FECOPE    HORA   FBASE1  EXPIRACION
+  TERMINAL  TIPO IDENTIFICACION ESTABLECIMIENTO           CIUDAD        PAIS  BIN ADQUIR.  PIN  VIS.REFER   TRNX CAVV  POS.C.CODE
+------------------------------------------------------------------------------------------------------------------------------------     
+
+- TARJETA 1234567890123456    NOMBRE APELLIDO1 APELLIDO2 NOMBRE1 NOMBRE2
+198771  00  I.N.T  604        23.00  SOL        23.00  SOL        23.00  AHO 194-36830982-0-10   14062025 234248 14062025 06-27
+  3         6012 650036         PLIN-VANESSA BERROSPI     Visa Direct   PE    420829       NO   516523243643  05  NO 59E-COMMMERCE 
