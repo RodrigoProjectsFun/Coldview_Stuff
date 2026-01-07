@@ -41,6 +41,7 @@ Sub ParseReport()
     ' 2. Setup Output Sheet
     Set ws = ActiveSheet
     ws.Cells.Clear
+    ws.Cells.NumberFormat = "@"
     
     ' Write Headers
     Dim headers As Variant
@@ -158,7 +159,7 @@ Sub ParseReport()
                 End If
                 
                 ' Common Info
-                outputData(outRow, 1) = "'" & currentCard ' Force Text
+                outputData(outRow, 1) = currentCard ' Force Text
                 outputData(outRow, 2) = currentName
                 
                 ' Line 1 Fields (Python 0-based start, Length) -> VBA Mid(str, Start+1, Length)
@@ -214,7 +215,7 @@ NextLine:
     Application.StatusBar = False
 End Sub
 
-Function CleanImporte(val As String) As Double
+Function CleanImporte(val As String) As String
     ' Remove non-numeric chars except . and -
     Dim res As String
     Dim c As String
@@ -228,11 +229,8 @@ Function CleanImporte(val As String) As Double
     Next i
     
     If res = "" Then
-        CleanImporte = 0
+        CleanImporte = "0"
     Else
-        On Error Resume Next
-        CleanImporte = CDbl(res)
-        If Err.Number <> 0 Then CleanImporte = 0
-        On Error GoTo 0
+        CleanImporte = res
     End If
 End Function
