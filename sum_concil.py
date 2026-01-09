@@ -14,7 +14,9 @@ def robust_conciliation_duplicates_allowed():
     # Headers
     col_card = 'Card'               
     col_op = 'Operation Number'
+    col_op = 'Operation Number'
     col_amount = 'Original Amount' 
+    col_recuperar = 'RECUPERAR'  # New Column
     
     output_file = 'CONCILIATION_FINAL_REPORT.xlsx'
     # ---------------------
@@ -87,8 +89,18 @@ def robust_conciliation_duplicates_allowed():
                 if col_amount in df.columns:
                     clean_amt = df[col_amount].astype(str).str.replace(r'[^\d.-]', '', regex=True)
                     df['Amt_Float'] = pd.to_numeric(clean_amt, errors='coerce').fillna(0.0)
-                    all_dfs.append(df)
-                    individual_files[std_name] = df.copy()  # Store for comparison
+                    df['Amt_Float'] = pd.to_numeric(clean_amt, errors='coerce').fillna(0.0)
+                
+                # Clean RECUPERAR (Default to 'SI' if missing, standardize to uppercase)
+                if col_recuperar in df.columns:
+                    df[col_recuperar] = df[col_recuperar].astype(str).str.strip().str.upper()
+                else:
+                    # Default to 'SI' if column missing (Assume valid charge)
+                    df[col_recuperar] = 'SI'
+
+                # Store result
+                all_dfs.append(df)
+                individual_files[std_name] = df.copy()
                 
             except Exception as e:
                 print(f"  [ERROR] {os.path.basename(f)}: {e}")
@@ -316,12 +328,22 @@ def robust_conciliation_duplicates_allowed():
         
         return warnings, errors
     
-    # Run quality checks on both piles
-    debt_warnings, debt_errors = check_data_quality(df_debt, "DEBT")
-    credit_warnings, credit_errors = check_data_quality(df_credit, "CREDIT")
-    
-    all_warnings = debt_warnings + credit_warnings
-    all_errors = debt_errors + credit_errors
+    # Run quality checks on individual files to pinpoint errors
+    all_warnings = []
+    all_errors = []
+
+    print(f"  Checking {len(debt_files)} DEBT files...")
+    for filename, df_single in debt_files.items():
+        w, e = check_data_quality(df_single, f"DEBT ({filename})")
+        all_warnings.extend(w)
+        all_errors.extend(e)
+
+    print(f"  Checking {len(credit_files)} CREDIT files...")
+    for filename, df_single in credit_files.items():
+        w, e = check_data_quality(df_single, f"CREDIT ({filename})")
+        all_warnings.extend(w)
+        all_errors.extend(e)
+
     
     # Print warnings (non-blocking)
     if all_warnings:
@@ -445,11 +467,88 @@ def robust_conciliation_duplicates_allowed():
         # Why? Because 'Amt_Float_DEBT' represents the actual individual transactions covered.
     ).reset_index()
 
-    # --- 4. EXPORT ---
+    # --- 4. LOGIC: RECUPERAR (New Logic) ---
+    print("Applying 'RECUPERAR' business logic...")
+    
+    # 4a. Pending Claims (RECUPERAR = 'NO' AND Unmatched)
+    # Filter DEBT keys that are NOT in matched
+    merged_keys = set(zip(merged[col_card], merged[col_op]))
+    
+    # helper for keys
+    df_debt['temp_key'] = list(zip(df_debt[col_card], df_debt[col_op]))
+    
+    # Filter: Has NO, Key NOT in merged
+    pending_claims = df_debt[
+        (df_debt[col_recuperar] == 'NO') & 
+        (~df_debt['temp_key'].isin(merged_keys))
+    ].copy()
+    
+    if not pending_claims.empty:
+        print(f"  ⚠ Found {len(pending_claims)} PENDING CLAIMS (Debtor Notes without Refunds)")
+    
+    # 4b. Unexpected Refunds (RECUPERAR != 'NO' AND Matched)
+    # Filter MERGED: RECUPERAR_DEBT != 'NO'
+    unexpected_refunds = merged[
+        merged[f'{col_recuperar}_DEBT'] != 'NO'
+    ].copy()
+    
+    if not unexpected_refunds.empty:
+        print(f"  ℹ Found {len(unexpected_refunds)} UNEXPECTED REFUNDS (Standard charges that were refunded)")
+
+    # 4c. Fully Reconciled Debtor Notes Summary
+    # Check if all 'NO' items in a file are matched.
+    fully_reconciled_files = []
+    
+    # Group by file
+    debt_groups = df_debt.groupby('Accounting_Ref')
+    
+    for filename, group in debt_groups:
+        total_no = group[group[col_recuperar] == 'NO']
+        if total_no.empty:
+            continue # Skip files with no debtor notes
+            
+        # Check overlaps
+        matched_no = total_no[total_no['temp_key'].isin(merged_keys)]
+        
+        if len(total_no) == len(matched_no):
+            # 100% Match!
+            # Get the creditors for this file from merged
+            relevant_merged = merged[
+                (merged['Accounting_Ref_DEBT'] == filename) & 
+                (merged[f'{col_recuperar}_DEBT'] == 'NO')
+            ]
+            
+            # Summarize creditors
+            creditor_summary = relevant_merged['Accounting_Ref_CREDIT'].unique()
+            creditor_str = ", ".join(creditor_summary)
+            
+            fully_reconciled_files.append({
+                'Debtor_Note_File': filename,
+                'Status': 'FULLY RECONCILED',
+                'Matched_With_Creditors': creditor_str,
+                'Total_Items': len(total_no),
+                'Total_Amount': total_no['Amt_Float'].sum()
+            })
+            
+    df_full_reconciled = pd.DataFrame(fully_reconciled_files)
+
+    # Clean up temp key
+    df_debt.drop(columns=['temp_key'], inplace=True, errors='ignore')
+
+    # --- 5. EXPORT ---
     try:
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
             debt_breakdown.to_excel(writer, sheet_name='By_Debt_File', index=False)
             credit_breakdown.to_excel(writer, sheet_name='By_Credit_File', index=False)
+            
+            if not pending_claims.empty:
+                pending_claims.to_excel(writer, sheet_name='Pending_Claims', index=False)
+                
+            if not unexpected_refunds.empty:
+                unexpected_refunds.to_excel(writer, sheet_name='Unexpected_Refunds', index=False)
+                
+            if not df_full_reconciled.empty:
+                df_full_reconciled.to_excel(writer, sheet_name='Fully_Reconciled_Notes', index=False)
             
             # Detailed Audit Sheet (Optional but recommended for tracing duplicates)
             merged.to_excel(writer, sheet_name='Detailed_Audit_Log', index=False)
