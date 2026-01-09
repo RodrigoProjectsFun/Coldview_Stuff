@@ -3,743 +3,519 @@ import os
 import glob
 import re
 
-def robust_conciliation_duplicates_allowed():
-    # --- CONFIGURATION ---
-    folder_path = './accounting_files'
+# --- HEADERS CONFIGURATION ---
+COL_CARD = 'Card'               
+COL_OP = 'Operation Number'
+COL_AMOUNT = 'Original Amount' 
+COL_RECUPERAR = 'RECUPERAR'
+AMT_FLOAT = 'Amt_Float'
+ACCOUNTING_REF = 'Accounting_Ref'
+
+DEBT_PATTERN = '*m2d-recu*.xlsx'
+CREDIT_PATTERN = '*m6d-dev*.xlsx'
+FOLDER_PATH = './accounting_files'
+
+# =============================================================================
+# 1. HELPER FUNCTIONS
+# =============================================================================
+
+def get_standardized_name(filepath):
+    """
+    Converts filename to strict format: M2D-RECU <DATE> or M6D-DEV <DATE>
+    """
+    filename = os.path.basename(filepath)
+    name_lower = filename.lower()
     
-    # Patterns
-    debt_pattern = '*m2d-recu*.xlsx'
-    credit_pattern = '*m6d-dev*.xlsx'
+    # Regex to capture date (dots or dashes)
+    date_match = re.search(r'(\d+[\.-]\d+[\.-]\d+)', name_lower)
+    date_str = date_match.group(1) if date_match else "NO_DATE"
     
-    # Headers
-    col_card = 'Card'               
-    col_op = 'Operation Number'
-    col_op = 'Operation Number'
-    col_amount = 'Original Amount' 
-    col_recuperar = 'RECUPERAR'  # New Column
+    if 'm2d-recu' in name_lower:
+        return f"M2D-RECU {date_str}"
+    elif 'm6d-dev' in name_lower:
+        return f"M6D-DEV {date_str}"
+    else:
+        return f"UNKNOWN {filename}"
+
+# =============================================================================
+# 2. DATA LOADING & CLEANING
+# =============================================================================
+
+def load_pile(pattern, label):
+    """
+    Loads and cleans files matching the pattern.
+    Returns: (combined_df, individual_files_dict)
+    """
+    files = glob.glob(os.path.join(FOLDER_PATH, pattern))
     
-    output_file = 'CONCILIATION_FINAL_REPORT.xlsx'
-    # ---------------------
-
-    print(f"--- Starting Conciliation (Duplicates Allowed) in {folder_path} ---")
-
-    # --- HELPER: STANDARDIZE FILENAMES ---
-    def get_standardized_name(filepath):
-        """
-        Converts filename to strict format: M2D-RECU <DATE> or M6D-DEV <DATE>
-        """
-        filename = os.path.basename(filepath)
-        name_lower = filename.lower()
-        
-        # Regex to capture date (dots or dashes)
-        date_match = re.search(r'(\d+[\.-]\d+[\.-]\d+)', name_lower)
-        date_str = date_match.group(1) if date_match else "NO_DATE"
-        
-        if 'm2d-recu' in name_lower:
-            return f"M2D-RECU {date_str}"
-        elif 'm6d-dev' in name_lower:
-            return f"M6D-DEV {date_str}"
-        else:
-            return f"UNKNOWN {filename}"
-
-    # --- 1. LOADER ---
-    def load_pile(pattern, label):
-        files = glob.glob(os.path.join(folder_path, pattern))
-        
-        # Double check filter (glob can be broad)
-        filter_keyword = 'm2d-recu' if label == "DEBT" else 'm6d-dev'
-        files = [f for f in files if filter_keyword in os.path.basename(f).lower()]
-        
-        all_dfs = []
-        individual_files = {}  # Track individual files for duplicate detection
-        print(f"Loading {len(files)} files for {label}...")
-
-        for f in files:
-            try:
-                # Load as String to protect IDs from scientific notation
-                df = pd.read_excel(f, dtype=str)
-                
-                # Drop empty rows (trailing rows Excel includes beyond actual data)
-                # A valid row MUST have both Card and Operation Number
-                if col_card in df.columns and col_op in df.columns:
-                    # Replace empty strings/whitespace with NaN for proper dropna
-                    df[col_card] = df[col_card].replace(r'^\s*$', pd.NA, regex=True)
-                    df[col_op] = df[col_op].replace(r'^\s*$', pd.NA, regex=True)
-                    
-                    # Drop rows where BOTH key columns are empty (these are trailing rows)
-                    rows_before = len(df)
-                    df = df.dropna(subset=[col_card, col_op], how='all')
-                    rows_dropped = rows_before - len(df)
-                    if rows_dropped > 0:
-                        print(f"  [INFO] {os.path.basename(f)}: Dropped {rows_dropped} empty trailing rows")
-                
-                # Create Standardized Reference Name
-                std_name = get_standardized_name(f)
-                df['Accounting_Ref'] = std_name
-                
-                # Clean Keys
-                if col_card in df.columns and col_op in df.columns:
-                    df[col_card] = df[col_card].str.strip()
-                    df[col_op] = df[col_op].str.strip()
-                else:
-                    print(f"  [SKIP] {std_name} missing Card or Operation headers.")
-                    continue
-                
-                # Clean Amount (Force to Float)
-                if col_amount in df.columns:
-                    clean_amt = df[col_amount].astype(str).str.replace(r'[^\d.-]', '', regex=True)
-                    df['Amt_Float'] = pd.to_numeric(clean_amt, errors='coerce').fillna(0.0)
-                    df['Amt_Float'] = pd.to_numeric(clean_amt, errors='coerce').fillna(0.0)
-                
-                # Clean RECUPERAR (Default to 'SI' if missing, standardize to uppercase)
-                if col_recuperar in df.columns:
-                    df[col_recuperar] = df[col_recuperar].astype(str).str.strip().str.upper()
-                else:
-                    # Default to 'SI' if column missing (Assume valid charge)
-                    df[col_recuperar] = 'SI'
-
-                # Store result
-                all_dfs.append(df)
-                individual_files[std_name] = df.copy()
-                
-            except Exception as e:
-                print(f"  [ERROR] {os.path.basename(f)}: {e}")
-        
-        combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
-        return combined, individual_files
-
-    # --- INTRA-PILE DUPLICATE DETECTION ---
-    def check_intra_pile_duplicates(individual_files, label):
-        """
-        Check if any files within the same pile are duplicates of each other.
-        Returns list of issues found.
-        """
-        issues = []
-        file_names = list(individual_files.keys())
-        
-        if len(file_names) < 2:
-            return issues  # Need at least 2 files to compare
-        
-        # Compare each pair of files
-        for i in range(len(file_names)):
-            for j in range(i + 1, len(file_names)):
-                name1, name2 = file_names[i], file_names[j]
-                df1, df2 = individual_files[name1], individual_files[name2]
-                
-                # Skip if different row counts (quick filter)
-                if len(df1) != len(df2):
-                    continue
-                
-                # Check 1: Key set comparison
-                keys1 = set(zip(df1[col_card], df1[col_op]))
-                keys2 = set(zip(df2[col_card], df2[col_op]))
-                
-                if keys1 == keys2:
-                    # Keys are identical - high suspicion
-                    # Check 2: Full data comparison (excluding metadata)
-                    compare_cols = [col for col in df1.columns if col not in ['Accounting_Ref']]
-                    df1_sorted = df1[compare_cols].sort_values(by=[col_card, col_op]).reset_index(drop=True)
-                    df2_sorted = df2[compare_cols].sort_values(by=[col_card, col_op]).reset_index(drop=True)
-                    
-                    if df1_sorted.equals(df2_sorted):
-                        issues.append(
-                            f"DUPLICATE {label} FILES: '{name1}' and '{name2}' contain IDENTICAL data!"
-                        )
-                    else:
-                        # Same keys but different amounts - still suspicious
-                        issues.append(
-                            f"SUSPICIOUS {label} FILES: '{name1}' and '{name2}' have identical operations but different amounts!"
-                        )
-                else:
-                    # Check overlap percentage
-                    overlap = keys1 & keys2
-                    overlap_pct = len(overlap) / max(len(keys1), 1) * 100
-                    
-                    if overlap_pct > 90:
-                        issues.append(
-                            f"WARNING {label}: '{name1}' and '{name2}' share {overlap_pct:.1f}% of operations!"
-                        )
-        
-        return issues
-
-    # Load Data
-    df_debt, debt_files = load_pile(debt_pattern, "DEBT")
-    df_credit, credit_files = load_pile(credit_pattern, "CREDIT")
-
-    # Check for duplicates within each pile
-    print("Checking for duplicate files within each category...")
-    intra_issues = []
-    intra_issues.extend(check_intra_pile_duplicates(debt_files, "DEBT"))
-    intra_issues.extend(check_intra_pile_duplicates(credit_files, "CREDIT"))
+    # Double check filter (glob can be broad)
+    filter_keyword = 'm2d-recu' if label == "DEBT" else 'm6d-dev'
+    files = [f for f in files if filter_keyword in os.path.basename(f).lower()]
     
-    if intra_issues:
-        print("\n" + "="*60)
-        print("⚠️  INTRA-CATEGORY DUPLICATE DETECTION ⚠️")
-        print("="*60)
-        for issue in intra_issues:
-            print(f"  ❌ {issue}")
-        print("="*60)
-        print("\nSame file may have been uploaded multiple times with different names.")
-        print("Conciliation ABORTED to prevent incorrect results.\n")
-        return
-    
-    print("✓ No intra-category duplicates found.")
+    all_dfs = []
+    individual_files = {}  # Track individual files for duplicate detection
+    print(f"Loading {len(files)} files for {label}...")
 
-
-    if df_debt.empty or df_credit.empty:
-        print("Stopping: Missing data.")
-        return
-
-    # --- CRITICAL VALIDATION: Detect Duplicate Files (Human Error Prevention) ---
-    print("Validating files are not duplicates...")
-    
-    def validate_files_are_different(df1, df2, label1="DEBT", label2="CREDIT"):
-        """
-        Comprehensive check to ensure files aren't accidentally the same.
-        Returns True if files are different (valid), False if duplicates detected.
-        """
-        issues = []
-        
-        # Check 1: Exact DataFrame Match (excluding metadata columns)
-        compare_cols = [col for col in df1.columns if col not in ['Accounting_Ref', 'Amt_Float']]
-        compare_cols2 = [col for col in df2.columns if col not in ['Accounting_Ref', 'Amt_Float']]
-        
-        if set(compare_cols) == set(compare_cols2):
-            df1_compare = df1[compare_cols].reset_index(drop=True)
-            df2_compare = df2[compare_cols2].reset_index(drop=True)
+    for f in files:
+        try:
+            # Load as String to protect IDs from scientific notation
+            df = pd.read_excel(f, dtype=str)
             
-            if len(df1_compare) == len(df2_compare):
-                # Sort both for comparison
-                df1_sorted = df1_compare.sort_values(by=compare_cols).reset_index(drop=True)
-                df2_sorted = df2_compare.sort_values(by=compare_cols2).reset_index(drop=True)
+            # Drop empty rows (trailing rows Excel includes beyond actual data)
+            if COL_CARD in df.columns and COL_OP in df.columns:
+                # Replace empty strings/whitespace with NaN for proper dropna
+                df[COL_CARD] = df[COL_CARD].replace(r'^\s*$', pd.NA, regex=True)
+                df[COL_OP] = df[COL_OP].replace(r'^\s*$', pd.NA, regex=True)
+                
+                # Drop rows where BOTH key columns are empty (trailing rows)
+                rows_before = len(df)
+                df = df.dropna(subset=[COL_CARD, COL_OP], how='all')
+                rows_dropped = rows_before - len(df)
+                if rows_dropped > 0:
+                    print(f"  [INFO] {os.path.basename(f)}: Dropped {rows_dropped} empty trailing rows")
+            
+            # Create Standardized Reference Name
+            std_name = get_standardized_name(f)
+            df[ACCOUNTING_REF] = std_name
+            
+            # Clean Keys
+            if COL_CARD in df.columns and COL_OP in df.columns:
+                df[COL_CARD] = df[COL_CARD].str.strip()
+                df[COL_OP] = df[COL_OP].str.strip()
+            else:
+                print(f"  [SKIP] {std_name} missing Card or Operation headers.")
+                continue
+            
+            # Clean Amount (Force to Float)
+            if COL_AMOUNT in df.columns:
+                clean_amt = df[COL_AMOUNT].astype(str).str.replace(r'[^\d.-]', '', regex=True)
+                df[AMT_FLOAT] = pd.to_numeric(clean_amt, errors='coerce').fillna(0.0)
+            
+            # Clean RECUPERAR (Default to 'SI' if missing, standardize to uppercase)
+            if COL_RECUPERAR in df.columns:
+                df[COL_RECUPERAR] = df[COL_RECUPERAR].astype(str).str.strip().str.upper()
+            else:
+                # Default to 'SI' if column missing (Assume valid charge)
+                df[COL_RECUPERAR] = 'SI'
+
+            # Store result
+            all_dfs.append(df)
+            individual_files[std_name] = df.copy()
+            
+        except Exception as e:
+            print(f"  [ERROR] {os.path.basename(f)}: {e}")
+    
+    combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+    return combined, individual_files
+
+def load_all_data():
+    df_debt, debt_files = load_pile(DEBT_PATTERN, "DEBT")
+    df_credit, credit_files = load_pile(CREDIT_PATTERN, "CREDIT")
+    return df_debt, df_credit, debt_files, credit_files
+
+# =============================================================================
+# 3. QUALITY CHECKS & VALIDATION
+# =============================================================================
+
+def check_intra_pile_duplicates(individual_files, label):
+    """
+    Check if any files within the same pile are duplicates of each other.
+    """
+    issues = []
+    file_names = list(individual_files.keys())
+    
+    if len(file_names) < 2:
+        return issues
+    
+    for i in range(len(file_names)):
+        for j in range(i + 1, len(file_names)):
+            name1, name2 = file_names[i], file_names[j]
+            df1, df2 = individual_files[name1], individual_files[name2]
+            
+            if len(df1) != len(df2): continue
+            
+            keys1 = set(zip(df1[COL_CARD], df1[COL_OP]))
+            keys2 = set(zip(df2[COL_CARD], df2[COL_OP]))
+            
+            if keys1 == keys2:
+                compare_cols = [col for col in df1.columns if col not in [ACCOUNTING_REF]]
+                df1_sorted = df1[compare_cols].sort_values(by=[COL_CARD, COL_OP]).reset_index(drop=True)
+                df2_sorted = df2[compare_cols].sort_values(by=[COL_CARD, COL_OP]).reset_index(drop=True)
                 
                 if df1_sorted.equals(df2_sorted):
-                    issues.append(f"EXACT MATCH: {label1} and {label2} contain identical data!")
-        
-        # Check 2: Row count + key overlap analysis
-        debt_keys = set(zip(df1[col_card], df1[col_op]))
-        credit_keys = set(zip(df2[col_card], df2[col_op]))
-        
-        overlap = debt_keys & credit_keys
-        overlap_pct = len(overlap) / max(len(debt_keys), 1) * 100
-        
-        if overlap_pct > 95 and len(debt_keys) == len(credit_keys):
-            issues.append(f"SUSPICIOUS: {overlap_pct:.1f}% key overlap with same row count!")
-        
-        # Check 3: Amount distribution fingerprint
-        if 'Amt_Float' in df1.columns and 'Amt_Float' in df2.columns:
-            debt_sum = df1['Amt_Float'].sum()
-            credit_sum = df2['Amt_Float'].sum()
-            debt_mean = df1['Amt_Float'].mean()
-            credit_mean = df2['Amt_Float'].mean()
-            
-            if (abs(debt_sum - credit_sum) < 0.01 and 
-                abs(debt_mean - credit_mean) < 0.01 and
-                len(df1) == len(df2)):
-                issues.append(f"SUSPICIOUS: Identical sum ({debt_sum:.2f}), mean ({debt_mean:.2f}), and row count!")
-        
-        # Check 4: Source file reference check
-        debt_sources = set(df1['Accounting_Ref'].unique())
-        credit_sources = set(df2['Accounting_Ref'].unique())
-        
-        # Normalize for comparison (remove date, compare base type)
-        debt_types = {s.split()[0] for s in debt_sources}  # e.g., "M2D-RECU"
-        credit_types = {s.split()[0] for s in credit_sources}  # e.g., "M6D-DEV"
-        
-        if debt_types == credit_types:
-            issues.append(f"WARNING: Both sources are type '{debt_types}' - expected different types!")
-        
-        return issues
-    
-    validation_issues = validate_files_are_different(df_debt, df_credit)
-    
-    if validation_issues:
-        print("\n" + "="*60)
-        print("⚠️  DUPLICATE FILE DETECTION - HUMAN ERROR LIKELY ⚠️")
-        print("="*60)
-        for issue in validation_issues:
-            print(f"  ❌ {issue}")
-        print("="*60)
-        print("\nPlease verify you haven't uploaded the same file twice.")
-        print("Conciliation ABORTED to prevent incorrect results.\n")
-        return
-    
-    print("✓ Files validated as distinct.")
+                    issues.append(f"DUPLICATE {label} FILES: '{name1}' and '{name2}' contain IDENTICAL data!")
+                else:
+                    issues.append(f"SUSPICIOUS {label} FILES: '{name1}' and '{name2}' have identical operations but different amounts!")
+            else:
+                overlap = keys1 & keys2
+                overlap_pct = len(overlap) / max(len(keys1), 1) * 100
+                if overlap_pct > 90:
+                    issues.append(f"WARNING {label}: '{name1}' and '{name2}' share {overlap_pct:.1f}% of operations!")
+    return issues
 
-    # --- DATA QUALITY VALIDATIONS ---
+def validate_files_are_different(df1, df2):
+    """
+    Ensure files aren't duplicates (e.g. uploading Credit file as Debt).
+    """
+    issues = []
+    compare_cols = [col for col in df1.columns if col not in [ACCOUNTING_REF, AMT_FLOAT]]
+    
+    # 1. Exact DataFrame Match
+    if set(compare_cols) == set([col for col in df2.columns if col not in [ACCOUNTING_REF, AMT_FLOAT]]):
+        df1_cmp = df1[compare_cols].reset_index(drop=True)
+        df2_cmp = df2[compare_cols].reset_index(drop=True)
+        if len(df1_cmp) == len(df2_cmp):
+            df1_s = df1_cmp.sort_values(by=compare_cols).reset_index(drop=True)
+            df2_s = df2_cmp.sort_values(by=compare_cols).reset_index(drop=True)
+            if df1_s.equals(df2_s):
+                issues.append("EXACT MATCH: DEBT and CREDIT files contain identical data!")
+
+    # 2. Key Overlap
+    debt_keys = set(zip(df1[COL_CARD], df1[COL_OP]))
+    credit_keys = set(zip(df2[COL_CARD], df2[COL_OP]))
+    overlap_pct = len(debt_keys & credit_keys) / max(len(debt_keys), 1) * 100
+    if overlap_pct > 95 and len(debt_keys) == len(credit_keys):
+        issues.append(f"SUSPICIOUS: {overlap_pct:.1f}% key overlap with same row count!")
+
+    # 3. Amount Fingerprint
+    if AMT_FLOAT in df1.columns and AMT_FLOAT in df2.columns:
+        if (abs(df1[AMT_FLOAT].sum() - df2[AMT_FLOAT].sum()) < 0.01 and 
+            abs(df1[AMT_FLOAT].mean() - df2[AMT_FLOAT].mean()) < 0.01 and
+            len(df1) == len(df2)):
+            issues.append("SUSPICIOUS: Identical sum, mean, and row count!")
+
+    # 4. Source Type Check
+    debt_sources = {s.split()[0] for s in df1[ACCOUNTING_REF].unique()}
+    credit_sources = {s.split()[0] for s in df2[ACCOUNTING_REF].unique()}
+    if debt_sources == credit_sources:
+        issues.append(f"WARNING: Both sources are type '{debt_sources}' - expected different types!")
+        
+    return issues
+
+def check_data_quality(df, label):
+    """
+    Data quality checks for standard errors.
+    """
+    warnings = []
+    errors = []
+    
+    if AMT_FLOAT in df.columns:
+        if (df[AMT_FLOAT] < 0).any(): 
+            warnings.append(f"{label}: Found negative amounts")
+        if (df[AMT_FLOAT] == 0).any(): 
+            warnings.append(f"{label}: Found zero-amount transactions")
+        
+        # Outliers (>3 std)
+        if len(df) > 10:
+            mean, std = df[AMT_FLOAT].mean(), df[AMT_FLOAT].std()
+            if std > 0 and not df[df[AMT_FLOAT] > mean + 3*std].empty:
+                warnings.append(f"{label}: Found unusually large amounts")
+
+    if COL_CARD in df.columns:
+        empty = df[COL_CARD].isna().sum() + (df[COL_CARD] == '').sum()
+        if empty > 0: errors.append(f"{label}: {empty} rows with empty Card numbers")
+        
+    if COL_OP in df.columns:
+        empty = df[COL_OP].isna().sum() + (df[COL_OP] == '').sum()
+        if empty > 0: errors.append(f"{label}: {empty} rows with empty Operation numbers")
+        
+    # Duplicates within file
+    if COL_CARD in df.columns and COL_OP in df.columns:
+        dups = df.groupby([COL_CARD, COL_OP, ACCOUNTING_REF]).size()
+        if (dups > 1).any():
+            warnings.append(f"{label}: Found duplicate key combinations within same file")
+
+    return warnings, errors
+
+def perform_validations(df_debt, df_credit, debt_files, credit_files):
+    """
+    Runs all validation logic. Returns True if valid, False if critical errors found.
+    """
+    print("Checking for duplicate files within each category...")
+    intra_issues = check_intra_pile_duplicates(debt_files, "DEBT") + \
+                   check_intra_pile_duplicates(credit_files, "CREDIT")
+    if intra_issues:
+        print("\n" + "="*60 + "\n⚠️  INTRA-CATEGORY DUPLICATE DETECTION ⚠️\n" + "="*60)
+        for i in intra_issues: print(f"  ❌ {i}")
+        print("\nConciliation ABORTED.\n")
+        return False
+
+    print("Validating files are not duplicates...")
+    dups = validate_files_are_different(df_debt, df_credit)
+    if dups:
+        print("\n" + "="*60 + "\n⚠️  DUPLICATE FILE DETECTION ⚠️\n" + "="*60)
+        for i in dups: print(f"  ❌ {i}")
+        print("\nConciliation ABORTED.\n")
+        return False
+
     print("Running data quality checks...")
-    
-    def check_data_quality(df, label):
-        """
-        Comprehensive data quality checks for financial data.
-        Returns (warnings, errors) - errors are critical, warnings are informational.
-        """
-        warnings = []
-        errors = []
-        
-        # Check 1: Negative Amounts
-        if 'Amt_Float' in df.columns:
-            negative_count = (df['Amt_Float'] < 0).sum()
-            if negative_count > 0:
-                warnings.append(f"{label}: Found {negative_count} negative amounts (might be legitimate refunds)")
-        
-        # Check 2: Zero Amounts
-        if 'Amt_Float' in df.columns:
-            zero_count = (df['Amt_Float'] == 0).sum()
-            if zero_count > 0:
-                warnings.append(f"{label}: Found {zero_count} zero-amount transactions")
-        
-        # Check 3: Very Large Amounts (Statistical Outliers - >3 std from mean)
-        if 'Amt_Float' in df.columns and len(df) > 10:
-            mean_amt = df['Amt_Float'].mean()
-            std_amt = df['Amt_Float'].std()
-            if std_amt > 0:
-                outlier_threshold = mean_amt + (3 * std_amt)
-                outliers = df[df['Amt_Float'] > outlier_threshold]
-                if len(outliers) > 0:
-                    max_outlier = outliers['Amt_Float'].max()
-                    warnings.append(f"{label}: Found {len(outliers)} unusually large amounts (max: {max_outlier:,.2f})")
-        
-        # Check 4: Missing/Empty Card Numbers
-        if col_card in df.columns:
-            empty_cards = df[col_card].isna().sum() + (df[col_card] == '').sum()
-            if empty_cards > 0:
-                errors.append(f"{label}: {empty_cards} rows have empty/null Card numbers!")
-        
-        # Check 5: Missing/Empty Operation Numbers
-        if col_op in df.columns:
-            empty_ops = df[col_op].isna().sum() + (df[col_op] == '').sum()
-            if empty_ops > 0:
-                errors.append(f"{label}: {empty_ops} rows have empty/null Operation numbers!")
-        
-        # Check 6: Duplicate Rows Within Single DataFrame
-        if col_card in df.columns and col_op in df.columns:
-            # Group by card+op and check if any combination appears more than expected
-            dup_check = df.groupby([col_card, col_op, 'Accounting_Ref']).size()
-            internal_dups = dup_check[dup_check > 1]
-            if len(internal_dups) > 0:
-                warnings.append(f"{label}: Found {len(internal_dups)} duplicate key combinations within same source file")
-        
-        # Check 7: Whitespace-only values
-        if col_card in df.columns:
-            whitespace_cards = (df[col_card].str.strip() == '').sum()
-            if whitespace_cards > 0:
-                errors.append(f"{label}: {whitespace_cards} Card numbers contain only whitespace!")
-        
-        return warnings, errors
-    
-    # Run quality checks on individual files to pinpoint errors
-    all_warnings = []
-    all_errors = []
+    all_warnings, all_errors = [], []
+    for f, df in debt_files.items():
+        w, e = check_data_quality(df, f"DEBT ({f})")
+        all_warnings.extend(w); all_errors.extend(e)
+    for f, df in credit_files.items():
+        w, e = check_data_quality(df, f"CREDIT ({f})")
+        all_warnings.extend(w); all_errors.extend(e)
 
-    print(f"  Checking {len(debt_files)} DEBT files...")
-    for filename, df_single in debt_files.items():
-        w, e = check_data_quality(df_single, f"DEBT ({filename})")
-        all_warnings.extend(w)
-        all_errors.extend(e)
-
-    print(f"  Checking {len(credit_files)} CREDIT files...")
-    for filename, df_single in credit_files.items():
-        w, e = check_data_quality(df_single, f"CREDIT ({filename})")
-        all_warnings.extend(w)
-        all_errors.extend(e)
-
-    
-    # Print warnings (non-blocking)
     if all_warnings:
-        print("\n" + "-"*60)
-        print("⚠️  DATA QUALITY WARNINGS (Review Recommended)")
-        print("-"*60)
-        for warning in all_warnings:
-            print(f"  ⚠ {warning}")
-        print("-"*60 + "\n")
+        print("\n" + "-"*60 + "\n⚠️  DATA QUALITY WARNINGS\n" + "-"*60)
+        for w in all_warnings: print(f"  ⚠ {w}")
     
-    # Print errors (blocking)
     if all_errors:
-        print("\n" + "="*60)
-        print("❌  DATA QUALITY ERRORS (Critical)")
-        print("="*60)
-        for error in all_errors:
-            print(f"  ❌ {error}")
-        print("="*60)
-        print("\nConciliation ABORTED due to data quality issues.\n")
-        return
-    
-    print("✓ Data quality checks passed.")
+        print("\n" + "="*60 + "\n❌  DATA QUALITY ERRORS\n" + "="*60)
+        for e in all_errors: print(f"  ❌ {e}")
+        print("\nConciliation ABORTED.\n")
+        return False
 
-    # --- 2. MATCHING (The Critical Part) ---
-    print("Matching Transactions (Allowing Duplicates)...")
-    
-    # We use an INNER JOIN. 
-    # Because duplicates exist in Debt (and possibly Credit), this will create a Cartesian Product 
-    # for those specific keys. This is EXPECTED behavior.
-    # Ex: 2 Debts match 1 Credit -> Result is 2 rows.
+    return True
+
+# =============================================================================
+# 4. MATCHING & ANALYSIS
+# =============================================================================
+
+def perform_matching(df_debt, df_credit):
+    print("Matching Transactions...")
     merged = pd.merge(
         df_debt, 
         df_credit, 
-        on=[col_card, col_op], 
+        on=[COL_CARD, COL_OP], 
         how='inner', 
         suffixes=('_DEBT', '_CREDIT')
     )
+    return merged
 
-    if merged.empty:
-        print("No matches found.")
-        return
-
-    # --- ORPHANED RECORDS ANALYSIS ---
-    # BUSINESS RULE: All credits MUST match debts (can't have refund without original charge)
-    # But debts without credits are okay (not all charges have been refunded yet)
+def check_orphans(df_debt, df_credit, merged):
     print("Analyzing unmatched records...")
+    merged_keys = set(zip(merged[COL_CARD], merged[COL_OP]))
+    credit_keys = set(zip(df_credit[COL_CARD], df_credit[COL_OP]))
+    orphaned_credit_keys = credit_keys - merged_keys
     
-    # Find orphaned debts (debts with no matching credit) - INFORMATIONAL ONLY
-    merged_debt_keys = set(zip(merged[col_card], merged[col_op]))
-    all_debt_keys = set(zip(df_debt[col_card], df_debt[col_op]))
-    orphaned_debt_keys = all_debt_keys - merged_debt_keys
+    if orphaned_credit_keys:
+        print("\n" + "="*60 + "\n❌  CRITICAL ERROR: ORPHANED CREDITS DETECTED\n" + "="*60)
+        print(f"  Found {len(orphaned_credit_keys)} credits with NO matching debt!")
+        print("  Every credit MUST have a corresponding debt.")
+        print("\nConciliation ABORTED.")
+        return False
     
-    # Find orphaned credits (credits with no matching debt) - CRITICAL ERROR
-    all_credit_keys = set(zip(df_credit[col_card], df_credit[col_op]))
-    orphaned_credit_keys = all_credit_keys - merged_debt_keys
-    
-    # Calculate orphaned amounts
-    orphaned_debts = df_debt[df_debt.apply(lambda x: (x[col_card], x[col_op]) in orphaned_debt_keys, axis=1)]
-    orphaned_credits = df_credit[df_credit.apply(lambda x: (x[col_card], x[col_op]) in orphaned_credit_keys, axis=1)]
-    
-    # CRITICAL: Check for orphaned credits FIRST (blocking error)
-    if len(orphaned_credit_keys) > 0:
-        orphaned_credit_total = orphaned_credits['Amt_Float'].sum() if 'Amt_Float' in orphaned_credits.columns else 0
-        
-        print("\n" + "="*60)
-        print("❌  CRITICAL ERROR: ORPHANED CREDITS DETECTED")
-        print("="*60)
-        print(f"  Found {len(orphaned_credit_keys):,} credit(s) with NO matching debt!")
-        print(f"  Total orphaned credit amount: ${orphaned_credit_total:,.2f}")
-        print("")
-        print("  BUSINESS RULE VIOLATION:")
-        print("  Every credit (refund) MUST have a corresponding debt (original charge).")
-        print("  Credits without matching debts indicate data integrity issues.")
-        print("")
-        print("  Sample orphaned credits (first 5):")
-        for i, (card, op) in enumerate(list(orphaned_credit_keys)[:5]):
-            amt = orphaned_credits[(orphaned_credits[col_card] == card) & 
-                                   (orphaned_credits[col_op] == op)]['Amt_Float'].iloc[0] if 'Amt_Float' in orphaned_credits.columns else 'N/A'
-            print(f"    {i+1}. Card: {card}, Op: {op}, Amount: ${amt:,.2f}" if isinstance(amt, float) else f"    {i+1}. Card: {card}, Op: {op}")
-        if len(orphaned_credit_keys) > 5:
-            print(f"    ... and {len(orphaned_credit_keys) - 5} more")
-        print("="*60)
-        print("\nConciliation ABORTED. Please verify credit file data.\n")
-        return
-    
-    # Informational: Report orphaned debts (non-blocking)
-    if len(orphaned_debt_keys) > 0:
-        orphaned_debt_total = orphaned_debts['Amt_Float'].sum() if 'Amt_Float' in orphaned_debts.columns else 0
-        match_rate_debt = (len(all_debt_keys) - len(orphaned_debt_keys)) / max(len(all_debt_keys), 1) * 100
-        
-        print("\n" + "-"*60)
-        print("📊 UNMATCHED DEBTS (Informational - Not Yet Refunded)")
-        print("-"*60)
-        print(f"  • Unmatched DEBT operations: {len(orphaned_debt_keys):,} (Total: ${orphaned_debt_total:,.2f})")
-        print(f"  • DEBT match rate: {match_rate_debt:.1f}%")
-        print("-"*60)
-        print("  ℹ️  These debts have no matching credits yet (normal if not refunded).\n")
+    debt_keys = set(zip(df_debt[COL_CARD], df_debt[COL_OP]))
+    orphaned_debt_keys = debt_keys - merged_keys
+    if orphaned_debt_keys:
+        print(f"\n📊 UNMATCHED DEBTS: {len(orphaned_debt_keys)} (Informational)")
     else:
-        print("✓ All credits matched to debts. All debts have corresponding credits (100% reconciliation).")
+        print("✓ All credits matched to debts (100% reconciliation).")
+        
+    return True
 
-
-    # --- 3. AGGREGATION (The Math Fix) ---
-    # We must be very careful what we sum.
-    # Since 1 Credit row might be repeated across 5 Debt rows, summing Credit column = WRONG.
-    # But 5 Debt rows are distinct payments, so summing Debt column = CORRECT.
+def analyze_variance(merged):
+    print("Checking for amount variances...")
+    variance_check = merged.groupby(
+        [f'{ACCOUNTING_REF}_CREDIT', COL_CARD, COL_OP, f'{AMT_FLOAT}_CREDIT']
+    ).agg(
+        Total_Debts_Covered=(f'{AMT_FLOAT}_DEBT', 'sum')
+    ).reset_index()
     
-    print("Generating Accounting Breakdown...")
+    variance_check['Variance'] = variance_check[f'{AMT_FLOAT}_CREDIT'] - variance_check['Total_Debts_Covered']
+    variance_report = variance_check[variance_check['Variance'].abs() > 0.01].copy()
+    
+    bad_credit_keys = set()
+    
+    if not variance_report.empty:
+        print(f"  ⚠ Found {len(variance_report)} MATCHES WITH VARIANCE")
+        variance_report['Status'] = variance_report['Variance'].apply(
+            lambda x: "OVERPAID (Refund > Debts)" if x > 0 else "UNDERPAID (Refund < Debts)"
+        )
+        # Collect bad keys to exclude from strict reconciliation
+        for _, row in variance_report.iterrows():
+            bad_credit_keys.add((row[f'{ACCOUNTING_REF}_CREDIT'], row[COL_CARD], row[COL_OP]))
+            
+        variance_report.rename(columns={
+            f'{ACCOUNTING_REF}_CREDIT': 'Credit_File',
+            f'{AMT_FLOAT}_CREDIT': 'Refund_Amount'
+        }, inplace=True)
+        
+    return variance_report, bad_credit_keys
 
-    # VIEW 1: DEBT FILE PERSPECTIVE
-    # "Which Credit Files paid off this Debt File?"
-    debt_breakdown = merged.groupby(['Accounting_Ref_DEBT', 'Accounting_Ref_CREDIT']).agg(
-        Count_Operations=('Operation Number', 'count'),
-        Total_Conciliated_Amount=('Amt_Float_DEBT', 'sum') # Summing the Debt side is safe
-    ).reset_index()
-
-    # VIEW 2: CREDIT FILE PERSPECTIVE
-    # "Which Debt Files did this Credit File cover?"
-    credit_breakdown = merged.groupby(['Accounting_Ref_CREDIT', 'Accounting_Ref_DEBT']).agg(
-        Count_Operations=('Operation Number', 'count'),
-        Total_Conciliated_Amount=('Amt_Float_DEBT', 'sum') # We still sum DEBT here.
-        # Why? Because 'Amt_Float_DEBT' represents the actual individual transactions covered.
-    ).reset_index()
-
-    # --- 4. LOGIC: RECUPERAR (New Logic) ---
+def identify_recuperar_scenarios(df_debt, merged):
     print("Applying 'RECUPERAR' business logic...")
     
-    # 4a. Pending Claims (RECUPERAR = 'NO' AND Unmatched)
-    # Filter DEBT keys that are NOT in matched
-    merged_keys = set(zip(merged[col_card], merged[col_op]))
+    # 1. Pending Claims (RECUPERAR='NO' and not matched)
+    merged_keys = set(zip(merged[COL_CARD], merged[COL_OP]))
+    df_debt['temp_key'] = list(zip(df_debt[COL_CARD], df_debt[COL_OP]))
     
-    # helper for keys
-    df_debt['temp_key'] = list(zip(df_debt[col_card], df_debt[col_op]))
-    
-    # Filter: Has NO, Key NOT in merged
     pending_claims = df_debt[
-        (df_debt[col_recuperar] == 'NO') & 
+        (df_debt[COL_RECUPERAR] == 'NO') & 
         (~df_debt['temp_key'].isin(merged_keys))
     ].copy()
     
     if not pending_claims.empty:
-        print(f"  ⚠ Found {len(pending_claims)} PENDING CLAIMS (Debtor Notes without Refunds)")
-    
-    # 4b. Unexpected Refunds (RECUPERAR != 'NO' AND Matched)
-    # Filter MERGED: RECUPERAR_DEBT != 'NO'
-    unexpected_refunds = merged[
-        merged[f'{col_recuperar}_DEBT'] != 'NO'
-    ].copy()
+        print(f"  ⚠ Found {len(pending_claims)} PENDING CLAIMS")
+        
+    # 2. Unexpected Refunds (RECUPERAR!='NO' but matched)
+    unexpected_refunds = merged[merged[f'{COL_RECUPERAR}_DEBT'] != 'NO'].copy()
     
     if not unexpected_refunds.empty:
-        print(f"  ℹ Found {len(unexpected_refunds)} UNEXPECTED REFUNDS (Standard charges that were refunded)")
-
-    # Clean up temp key (Moved to end)
-    # df_debt.drop(columns=['temp_key'], inplace=True, errors='ignore')
-
-    # --- 5. VARIANCE ANALYSIS (Smart Amount Check) ---
-    print("Checking for amount variances (Many-to-One Validation)...")
-    
-    # Track credits with variance to exclude them from "Fully Reconciled" status
-    bad_credit_keys = set() 
-    
-    # Group by Unique Credit Operation
-    # Key: Credit Ref, Card, Op Number, Credit Amount
-    # Sum: Debt Amount
-    variance_check = merged.groupby(
-        ['Accounting_Ref_CREDIT', col_card, col_op, 'Amt_Float_CREDIT']
-    ).agg(
-        Total_Debts_Covered=('Amt_Float_DEBT', 'sum'),
-        Count_Debts=('Amt_Float_DEBT', 'count')
-    ).reset_index()
-    
-    # Calculate Variance: Credit - Debt
-    # Positive Variance = Credit > Debt (Overpaid/Surplus)
-    # Negative Variance = Credit < Debt (Underpaid/Partial Refund)
-    variance_check['Variance'] = variance_check['Amt_Float_CREDIT'] - variance_check['Total_Debts_Covered']
-    
-    # Filter for significant variance (> 0.01)
-    variance_report = variance_check[variance_check['Variance'].abs() > 0.01].copy()
-    
-    if not variance_report.empty:
-        print(f"  ⚠ Found {len(variance_report)} MATCHES WITH VARIANCE (Amount Mismatches)")
+        print(f"  ℹ Found {len(unexpected_refunds)} UNEXPECTED REFUNDS")
         
-        # Add Status Column
-        def get_status(v):
-            if v > 0: return "OVERPAID (Refund > Debts)"
-            return "UNDERPAID (Refund < Debts)"
-            
-        variance_report['Status'] = variance_report['Variance'].apply(get_status)
-        
-        # Collect "Bad Credits" to block full reconciliation
-        # Key needs to match what we can look up from merged
-        for _, row in variance_report.iterrows():
-            # Tuple: (CreditFile, Card, Op)
-            bad_key = (row['Accounting_Ref_CREDIT'], row[col_card], row[col_op])
-            bad_credit_keys.add(bad_key)
-        
-        # Rename for export
-        variance_report.rename(columns={
-            'Accounting_Ref_CREDIT': 'Credit_File',
-            'Amt_Float_CREDIT': 'Refund_Amount'
-        }, inplace=True)
+    return pending_claims, unexpected_refunds, merged_keys
 
+# =============================================================================
+# 5. REPORT GENERATION
+# =============================================================================
 
-    # --- 4c. Fully Reconciled Debtor Notes Summary (Moved after Variance for validation) ---
-    # Check if all 'NO' items in a file are matched AND clean.
+def generate_fully_reconciled_summary(df_debt, merged, pending_claims, unexpected_refunds, bad_credit_keys, merged_keys):
     print("Generating Fully Reconciled Summary (Strict Mode)...")
     fully_reconciled_files = []
     
-    # Group by file
-    debt_groups = df_debt.groupby('Accounting_Ref')
+    debt_groups = df_debt.groupby(ACCOUNTING_REF)
     
     for filename, group in debt_groups:
-        total_no = group[group[col_recuperar] == 'NO']
-        if total_no.empty:
-            continue # Skip files with no debtor notes
-            
-        # CHECK 1: Must have NO Pending Claims (Unmatched Items)
-        # If this file appears in the pending_claims list, it's disqualified
-        if filename in pending_claims['Accounting_Ref'].values:
-            continue
-
-        # CHECK 2: Must have NO Unexpected Refunds
-        # If this file appears in unexpected_refunds (as the DEBT source), it's disqualified
-        if filename in unexpected_refunds['Accounting_Ref_DEBT'].values:
-             continue
-            
-        # Check overlaps (Should be 100% since check 1 passed, but verify)
+        total_no = group[group[COL_RECUPERAR] == 'NO']
+        if total_no.empty: continue
+        
+        # Check Exclusions
+        if filename in pending_claims[ACCOUNTING_REF].values: continue
+        if filename in unexpected_refunds[f'{ACCOUNTING_REF}_DEBT'].values: continue
+        
+        # Verify 100% Match
         matched_no = total_no[total_no['temp_key'].isin(merged_keys)]
+        if len(total_no) != len(matched_no): continue
         
-        if len(total_no) == len(matched_no):
-            # 100% Match!
-            # Get the creditors for this file from merged
-            relevant_merged = merged[
-                (merged['Accounting_Ref_DEBT'] == filename) & 
-                (merged[f'{col_recuperar}_DEBT'] == 'NO')
-            ]
-            
-            # CHECK 3: None of the matching credits can have Variance
-            has_bad_credit = False
-            for _, row in relevant_merged.iterrows():
-                # Check if this specific credit match has a variance
-                check_key = (row['Accounting_Ref_CREDIT'], row[col_card], row[col_op])
-                if check_key in bad_credit_keys:
-                    has_bad_credit = True
-                    break
-            
-            if has_bad_credit:
-                continue # Disqualified due to variance
-            
-            # Group by Creditor to get breakdown of how much each covered
-            creditor_breakdown = relevant_merged.groupby('Accounting_Ref_CREDIT').agg(
-                Amount_Covered=('Amt_Float_DEBT', 'sum'),
-                Count_Ops=('Operation Number', 'count')
-            ).reset_index()
-            
-            for _, row_breakdown in creditor_breakdown.iterrows():
-                fully_reconciled_files.append({
-                    'Debtor_Note_File': filename,
-                    'Creditor_File': row_breakdown['Accounting_Ref_CREDIT'],
-                    'Amount_Covered': row_breakdown['Amount_Covered'],
-                    'Count_Ops': row_breakdown['Count_Ops'],
-                    'Status': 'FULLY RECONCILED'
-                })
-            
-    df_full_reconciled = pd.DataFrame(fully_reconciled_files)
-    
-    if not df_full_reconciled.empty:
-        # Keep only required columns and rename
-        df_full_reconciled = df_full_reconciled[['Debtor_Note_File', 'Creditor_File', 'Amount_Covered']]
-        df_full_reconciled.columns = ['DEBTOR FILE', 'CREDIT FILE NOTE', 'AMOUNT THAT MATCHED']
+        # Verify Variance
+        relevant_merged = merged[
+            (merged[f'{ACCOUNTING_REF}_DEBT'] == filename) & 
+            (merged[f'{COL_RECUPERAR}_DEBT'] == 'NO')
+        ]
         
-        # Add Total Row
-        total_matched = df_full_reconciled['AMOUNT THAT MATCHED'].sum()
+        has_variance = False
+        for _, row in relevant_merged.iterrows():
+            key = (row[f'{ACCOUNTING_REF}_CREDIT'], row[COL_CARD], row[COL_OP])
+            if key in bad_credit_keys:
+                has_variance = True; break
+        if has_variance: continue
+        
+        # Add to Summary
+        creditor_breakdown = relevant_merged.groupby(f'{ACCOUNTING_REF}_CREDIT').agg(
+            Amount_Covered=(f'{AMT_FLOAT}_DEBT', 'sum')
+        ).reset_index()
+        
+        for _, row in creditor_breakdown.iterrows():
+            fully_reconciled_files.append({
+                'DEBTOR FILE': filename,
+                'CREDIT FILE NOTE': row[f'{ACCOUNTING_REF}_CREDIT'],
+                'AMOUNT THAT MATCHED': row['Amount_Covered']
+            })
+            
+    df_full = pd.DataFrame(fully_reconciled_files)
+    if not df_full.empty:
+         # Add Total Row
+        total_val = df_full['AMOUNT THAT MATCHED'].sum()
         total_row = pd.DataFrame([{
             'DEBTOR FILE': 'TOTAL', 
             'CREDIT FILE NOTE': '', 
-            'AMOUNT THAT MATCHED': total_matched
+            'AMOUNT THAT MATCHED': total_val
         }])
+        df_full = pd.concat([df_full, total_row], ignore_index=True)
         
-        df_full_reconciled = pd.concat([df_full_reconciled, total_row], ignore_index=True)
+    return df_full
 
-    # --- 4d. Net Balanced / Self-Corrected Files Logic ---
-    print("Checking for Net Balanced files (Self-Closing Notes)...")
-    net_balanced_rows = []
+def generate_net_balanced_summary(pending_claims, unexpected_refunds, merged, df_fully_reconciled):
+    print("Checking for Net Balanced files...")
+    rows = []
     
-    # Identify files that are NOT fully reconciled but might be balanced
-    # Candidates: Files in pending_claims OR unexpected_refunds
-    candidate_files = set(pending_claims['Accounting_Ref'].unique()) | set(unexpected_refunds['Accounting_Ref_DEBT'].unique())
+    candidates = set(pending_claims[ACCOUNTING_REF].unique()) | set(unexpected_refunds[f'{ACCOUNTING_REF}_DEBT'].unique())
     
-    # Exclude files that are already FULLY RECONCILED (though logic above ensures they wouldn't be here if pending/unexpected exist)
-    if not df_full_reconciled.empty and 'DEBTOR FILE' in df_full_reconciled.columns:
-        # Note: df_full_reconciled has renamed columns now
-        fully_reconciled_set = set(df_full_reconciled['DEBTOR FILE'].unique())
-        candidate_files = candidate_files - fully_reconciled_set
+    # Exclude strictly reconciled
+    if not df_fully_reconciled.empty:
+        excluded = set(df_fully_reconciled['DEBTOR FILE'].unique())
+        candidates = candidates - excluded
         
-    for filename in candidate_files:
+    for filename in candidates:
         if filename == 'TOTAL': continue
         
-        # 1. Gather Components
+        file_pending = pending_claims[pending_claims[ACCOUNTING_REF] == filename]
+        file_unexpected = unexpected_refunds[unexpected_refunds[f'{ACCOUNTING_REF}_DEBT'] == filename]
         
-        # A. Pending Claims (Unmatched NOs) -> The "Minus"
-        # Since 'pending_claims' is derived from df_debt, col names are raw
-        # need to verify column names in pending_claims. 
-        # It comes from: pending_claims = df_debt[...]
-        file_pending = pending_claims[pending_claims['Accounting_Ref'] == filename]
-        sum_pending = file_pending['Original Amount'].astype(float).sum()
+        sum_p = file_pending[COL_AMOUNT].astype(float).sum()
+        sum_u = file_unexpected[f'{AMT_FLOAT}_CREDIT'].sum()
         
-        # B. Unexpected Refunds (Matched SIs) -> The "Plus"
-        # It comes from: merged[...]
-        file_unexpected = unexpected_refunds[unexpected_refunds['Accounting_Ref_DEBT'] == filename]
-        # Sum the CREDIT amount because that's what we received (refund)
-        sum_unexpected = file_unexpected['Amt_Float_CREDIT'].sum()
-        
-        # Check Balance: Pending (Should be refunded) == Unexpected (Was refunded "wrongly")
-        # Tolerance 0.01
-        balance_diff = sum_pending - sum_unexpected
-        
-        if abs(balance_diff) < 0.01 and (sum_pending > 0 or sum_unexpected > 0):
-             # IT IS BALANCED!
-             # Generate Breakdown Rows
-             
-             # Add Pending Rows
-             for _, row in file_pending.iterrows():
-                 net_balanced_rows.append({
-                     'Debtor_File': filename,
-                     'Status': 'NET BALANCED',
-                     'Type': 'PENDING_CLAIM',
-                     'Card': row[col_card],
-                     'Operation': row[col_op],
-                     'Amount': float(row['Original Amount']),
-                     'Credit_Ref': 'N/A'
-                 })
-                 
-             # Add Unexpected Rows
-             for _, row in file_unexpected.iterrows():
-                 net_balanced_rows.append({
-                     'Debtor_File': filename,
-                     'Status': 'NET BALANCED',
-                     'Type': 'UNEXPECTED_REFUND',
-                     'Card': row[col_card], # Use raw key
-                     'Operation': row[col_op], # Use raw key
-                     'Amount': row['Amt_Float_CREDIT'],
-                     'Credit_Ref': row['Accounting_Ref_CREDIT']
-                 })
-                 
-             # Add Standard Matched Rows (Context)
-             # We need to find the "normal" matches for this file to show full picture
-             # merged: Accounting_Ref_DEBT == filename, RECUPERAR_DEBT != 'NO' -> Unexpected
-             # merged: Accounting_Ref_DEBT == filename, RECUPERAR_DEBT == 'NO' -> Matched NO (Correct)
-             
-             file_matched_no = merged[
-                 (merged['Accounting_Ref_DEBT'] == filename) & 
-                 (merged[f'{col_recuperar}_DEBT'] == 'NO')
-             ]
-             
-             for _, row in file_matched_no.iterrows():
-                 net_balanced_rows.append({
-                     'Debtor_File': filename,
-                     'Status': 'NET BALANCED',
-                     'Type': 'CORRECTLY_MATCHED',
-                     'Card': row[col_card], 
-                     'Operation': row[col_op], 
-                     'Amount': row['Amt_Float_DEBT'],
-                     'Credit_Ref': row['Accounting_Ref_CREDIT']
-                 })
+        if abs(sum_p - sum_u) < 0.01 and (sum_p > 0 or sum_u > 0):
+            # IT IS BALANCED
+            # Add Pending
+            for _, r in file_pending.iterrows():
+                rows.append({'Debtor_File': filename, 'Status': 'NET BALANCED', 'Type': 'PENDING_CLAIM', 'Amount': float(r[COL_AMOUNT])})
+            # Add Unexpected
+            for _, r in file_unexpected.iterrows():
+                rows.append({'Debtor_File': filename, 'Status': 'NET BALANCED', 'Type': 'UNEXPECTED_REFUND', 'Amount': r[f'{AMT_FLOAT}_CREDIT']})
+            # Add Context
+            file_matched = merged[
+                 (merged[f'{ACCOUNTING_REF}_DEBT'] == filename) & 
+                 (merged[f'{COL_RECUPERAR}_DEBT'] == 'NO')
+            ]
+            for _, r in file_matched.iterrows():
+                rows.append({'Debtor_File': filename, 'Status': 'NET BALANCED', 'Type': 'CORRECTLY_MATCHED', 'Amount': r[f'{AMT_FLOAT}_DEBT']})
+                
+    return pd.DataFrame(rows)
 
-    df_net_balanced = pd.DataFrame(net_balanced_rows)
-
-    # --- 6. EXPORT ---
+def export_results(merged, pending, unexpected, variance, full, net_balanced, output_file):
     try:
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            debt_breakdown.to_excel(writer, sheet_name='By_Debt_File', index=False)
-            credit_breakdown.to_excel(writer, sheet_name='By_Credit_File', index=False)
+            # Breakdowns
+            merged.groupby([f'{ACCOUNTING_REF}_DEBT', f'{ACCOUNTING_REF}_CREDIT']).agg(
+                Count=(COL_OP, 'count'), Amount=(f'{AMT_FLOAT}_DEBT', 'sum')
+            ).reset_index().to_excel(writer, sheet_name='By_Debt_File', index=False)
             
-            if not pending_claims.empty:
-                pending_claims.to_excel(writer, sheet_name='Pending_Claims', index=False)
-                
-            if not unexpected_refunds.empty:
-                unexpected_refunds.to_excel(writer, sheet_name='Unexpected_Refunds', index=False)
-                
-            if not df_full_reconciled.empty:
-                df_full_reconciled.to_excel(writer, sheet_name='Fully_Reconciled_Notes', index=False)
-                
-            if not df_net_balanced.empty:
-                df_net_balanced.to_excel(writer, sheet_name='Net_Balanced_Files', index=False)
+            merged.groupby([f'{ACCOUNTING_REF}_CREDIT', f'{ACCOUNTING_REF}_DEBT']).agg(
+                Count=(COL_OP, 'count'), Amount=(f'{AMT_FLOAT}_DEBT', 'sum')
+            ).reset_index().to_excel(writer, sheet_name='By_Credit_File', index=False)
             
-            if not variance_report.empty:
-                variance_report.to_excel(writer, sheet_name='Amount_Variances', index=False)
+            if not pending.empty: pending.to_excel(writer, sheet_name='Pending_Claims', index=False)
+            if not unexpected.empty: unexpected.to_excel(writer, sheet_name='Unexpected_Refunds', index=False)
+            if not full.empty: full.to_excel(writer, sheet_name='Fully_Reconciled_Notes', index=False)
+            if not net_balanced.empty: net_balanced.to_excel(writer, sheet_name='Net_Balanced_Files', index=False)
+            if not variance.empty: variance.to_excel(writer, sheet_name='Amount_Variances', index=False)
             
-            # Detailed Audit Sheet (Optional but recommended for tracing duplicates)
             merged.to_excel(writer, sheet_name='Detailed_Audit_Log', index=False)
             
         print(f"SUCCESS. Report saved to: {output_file}")
-        print("NOTE: 'Total_Conciliated_Amount' is calculated based on the sum of DEBT notes found.")
-        
     except PermissionError:
-        print(f"ERROR: Please close {output_file} and run again.")
+        print(f"ERROR: Close {output_file} and try again.")
+
+# =============================================================================
+# 6. MAIN ORCHESTRATOR
+# =============================================================================
+
+def robust_conciliation_duplicates_allowed():
+    print(f"--- Starting Conciliation in {FOLDER_PATH} ---")
+    
+    # 1. Load
+    df_debt, df_credit, debt_files, credit_files = load_all_data()
+    if df_debt.empty or df_credit.empty:
+        print("Stopping: Missing data.")
+        return
+
+    # 2. Validate
+    if not perform_validations(df_debt, df_credit, debt_files, credit_files):
+        return
+
+    # 3. Match
+    merged = perform_matching(df_debt, df_credit)
+    if merged.empty:
+        print("No matches found.")
+        return
+        
+    if not check_orphans(df_debt, df_credit, merged):
+        return
+
+    # 4. Analyze Logic
+    pending_claims, unexpected_refunds, merged_keys = identify_recuperar_scenarios(df_debt, merged)
+    variance_report, bad_credit_keys = analyze_variance(merged)
+    
+    # 5. Generate Summaries
+    df_full = generate_fully_reconciled_summary(df_debt, merged, pending_claims, unexpected_refunds, bad_credit_keys, merged_keys)
+    df_net = generate_net_balanced_summary(pending_claims, unexpected_refunds, merged, df_full)
+    
+    # 6. Export
+    export_results(merged, pending_claims, unexpected_refunds, variance_report, df_full, df_net, 'CONCILIATION_FINAL_REPORT.xlsx')
 
 if __name__ == "__main__":
     robust_conciliation_duplicates_allowed()
