@@ -495,8 +495,60 @@ def robust_conciliation_duplicates_allowed():
     if not unexpected_refunds.empty:
         print(f"  ℹ Found {len(unexpected_refunds)} UNEXPECTED REFUNDS (Standard charges that were refunded)")
 
-    # 4c. Fully Reconciled Debtor Notes Summary
-    # Check if all 'NO' items in a file are matched.
+    # Clean up temp key (Moved to end)
+    # df_debt.drop(columns=['temp_key'], inplace=True, errors='ignore')
+
+    # --- 5. VARIANCE ANALYSIS (Smart Amount Check) ---
+    print("Checking for amount variances (Many-to-One Validation)...")
+    
+    # Track credits with variance to exclude them from "Fully Reconciled" status
+    bad_credit_keys = set() 
+    
+    # Group by Unique Credit Operation
+    # Key: Credit Ref, Card, Op Number, Credit Amount
+    # Sum: Debt Amount
+    variance_check = merged.groupby(
+        ['Accounting_Ref_CREDIT', col_card, col_op, 'Amt_Float_CREDIT']
+    ).agg(
+        Total_Debts_Covered=('Amt_Float_DEBT', 'sum'),
+        Count_Debts=('Amt_Float_DEBT', 'count')
+    ).reset_index()
+    
+    # Calculate Variance: Credit - Debt
+    # Positive Variance = Credit > Debt (Overpaid/Surplus)
+    # Negative Variance = Credit < Debt (Underpaid/Partial Refund)
+    variance_check['Variance'] = variance_check['Amt_Float_CREDIT'] - variance_check['Total_Debts_Covered']
+    
+    # Filter for significant variance (> 0.01)
+    variance_report = variance_check[variance_check['Variance'].abs() > 0.01].copy()
+    
+    if not variance_report.empty:
+        print(f"  ⚠ Found {len(variance_report)} MATCHES WITH VARIANCE (Amount Mismatches)")
+        
+        # Add Status Column
+        def get_status(v):
+            if v > 0: return "OVERPAID (Refund > Debts)"
+            return "UNDERPAID (Refund < Debts)"
+            
+        variance_report['Status'] = variance_report['Variance'].apply(get_status)
+        
+        # Collect "Bad Credits" to block full reconciliation
+        # Key needs to match what we can look up from merged
+        for _, row in variance_report.iterrows():
+            # Tuple: (CreditFile, Card, Op)
+            bad_key = (row['Accounting_Ref_CREDIT'], row[col_card], row[col_op])
+            bad_credit_keys.add(bad_key)
+        
+        # Rename for export
+        variance_report.rename(columns={
+            'Accounting_Ref_CREDIT': 'Credit_File',
+            'Amt_Float_CREDIT': 'Refund_Amount'
+        }, inplace=True)
+
+
+    # --- 4c. Fully Reconciled Debtor Notes Summary (Moved after Variance for validation) ---
+    # Check if all 'NO' items in a file are matched AND clean.
+    print("Generating Fully Reconciled Summary (Strict Mode)...")
     fully_reconciled_files = []
     
     # Group by file
@@ -507,7 +559,17 @@ def robust_conciliation_duplicates_allowed():
         if total_no.empty:
             continue # Skip files with no debtor notes
             
-        # Check overlaps
+        # CHECK 1: Must have NO Pending Claims (Unmatched Items)
+        # If this file appears in the pending_claims list, it's disqualified
+        if filename in pending_claims['Accounting_Ref'].values:
+            continue
+
+        # CHECK 2: Must have NO Unexpected Refunds
+        # If this file appears in unexpected_refunds (as the DEBT source), it's disqualified
+        if filename in unexpected_refunds['Accounting_Ref_DEBT'].values:
+             continue
+            
+        # Check overlaps (Should be 100% since check 1 passed, but verify)
         matched_no = total_no[total_no['temp_key'].isin(merged_keys)]
         
         if len(total_no) == len(matched_no):
@@ -517,6 +579,18 @@ def robust_conciliation_duplicates_allowed():
                 (merged['Accounting_Ref_DEBT'] == filename) & 
                 (merged[f'{col_recuperar}_DEBT'] == 'NO')
             ]
+            
+            # CHECK 3: None of the matching credits can have Variance
+            has_bad_credit = False
+            for _, row in relevant_merged.iterrows():
+                # Check if this specific credit match has a variance
+                check_key = (row['Accounting_Ref_CREDIT'], row[col_card], row[col_op])
+                if check_key in bad_credit_keys:
+                    has_bad_credit = True
+                    break
+            
+            if has_bad_credit:
+                continue # Disqualified due to variance
             
             # Group by Creditor to get breakdown of how much each covered
             creditor_breakdown = relevant_merged.groupby('Accounting_Ref_CREDIT').agg(
@@ -534,11 +608,23 @@ def robust_conciliation_duplicates_allowed():
                 })
             
     df_full_reconciled = pd.DataFrame(fully_reconciled_files)
+    
+    if not df_full_reconciled.empty:
+        # Keep only required columns and rename
+        df_full_reconciled = df_full_reconciled[['Debtor_Note_File', 'Creditor_File', 'Amount_Covered']]
+        df_full_reconciled.columns = ['DEBTOR FILE', 'CREDIT FILE NOTE', 'AMOUNT THAT MATCHED']
+        
+        # Add Total Row
+        total_matched = df_full_reconciled['AMOUNT THAT MATCHED'].sum()
+        total_row = pd.DataFrame([{
+            'DEBTOR FILE': 'TOTAL', 
+            'CREDIT FILE NOTE': '', 
+            'AMOUNT THAT MATCHED': total_matched
+        }])
+        
+        df_full_reconciled = pd.concat([df_full_reconciled, total_row], ignore_index=True)
 
-    # Clean up temp key
-    df_debt.drop(columns=['temp_key'], inplace=True, errors='ignore')
-
-    # --- 5. EXPORT ---
+    # --- 6. EXPORT ---
     try:
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
             debt_breakdown.to_excel(writer, sheet_name='By_Debt_File', index=False)
@@ -552,6 +638,9 @@ def robust_conciliation_duplicates_allowed():
                 
             if not df_full_reconciled.empty:
                 df_full_reconciled.to_excel(writer, sheet_name='Fully_Reconciled_Notes', index=False)
+            
+            if not variance_report.empty:
+                variance_report.to_excel(writer, sheet_name='Amount_Variances', index=False)
             
             # Detailed Audit Sheet (Optional but recommended for tracing duplicates)
             merged.to_excel(writer, sheet_name='Detailed_Audit_Log', index=False)
