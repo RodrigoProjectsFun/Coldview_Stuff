@@ -13,7 +13,6 @@ __pycache__/
 config.json
 
 # Logs
-*.log
 
 # IDE
 .idea/

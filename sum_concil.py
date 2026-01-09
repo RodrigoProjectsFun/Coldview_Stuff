@@ -518,17 +518,20 @@ def robust_conciliation_duplicates_allowed():
                 (merged[f'{col_recuperar}_DEBT'] == 'NO')
             ]
             
-            # Summarize creditors
-            creditor_summary = relevant_merged['Accounting_Ref_CREDIT'].unique()
-            creditor_str = ", ".join(creditor_summary)
+            # Group by Creditor to get breakdown of how much each covered
+            creditor_breakdown = relevant_merged.groupby('Accounting_Ref_CREDIT').agg(
+                Amount_Covered=('Amt_Float_DEBT', 'sum'),
+                Count_Ops=('Operation Number', 'count')
+            ).reset_index()
             
-            fully_reconciled_files.append({
-                'Debtor_Note_File': filename,
-                'Status': 'FULLY RECONCILED',
-                'Matched_With_Creditors': creditor_str,
-                'Total_Items': len(total_no),
-                'Total_Amount': total_no['Amt_Float'].sum()
-            })
+            for _, row_breakdown in creditor_breakdown.iterrows():
+                fully_reconciled_files.append({
+                    'Debtor_Note_File': filename,
+                    'Creditor_File': row_breakdown['Accounting_Ref_CREDIT'],
+                    'Amount_Covered': row_breakdown['Amount_Covered'],
+                    'Count_Ops': row_breakdown['Count_Ops'],
+                    'Status': 'FULLY RECONCILED'
+                })
             
     df_full_reconciled = pd.DataFrame(fully_reconciled_files)
 

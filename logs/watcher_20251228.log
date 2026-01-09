@@ -1,0 +1,46 @@
+2025-12-28 20:21:15 - INFO - ==================================================
+2025-12-28 20:21:15 - INFO - FILE WATCHER STARTED
+2025-12-28 20:21:15 - INFO - Watch: C:\Users\rodri\Music\TARGET
+2025-12-28 20:21:15 - INFO - Target: TEST.txt
+2025-12-28 20:21:15 - INFO - Dest: C:\Users\rodri\Music\DESTINATION
+2025-12-28 20:21:15 - INFO - Schedule: ['09:00', '12:00', '17:00', '00:35']
+2025-12-28 20:21:15 - INFO - ==================================================
+2025-12-28 20:21:16 - INFO - Scheduled: 09:00
+2025-12-28 20:21:16 - INFO - Scheduled: 12:00
+2025-12-28 20:21:16 - INFO - Scheduled: 17:00
+2025-12-28 20:21:16 - INFO - Scheduled: 00:35
+2025-12-28 20:21:16 - INFO - ==================================================
+2025-12-28 20:21:16 - INFO - CHECK @ 20:21:16
+2025-12-28 20:21:16 - INFO - ==================================================
+2025-12-28 20:21:16 - INFO - Watch directory OK: C:\Users\rodri\Music\TARGET
+2025-12-28 20:21:16 - INFO - Found: TEST.txt (10 bytes)
+2025-12-28 20:21:16 - INFO - Copied to: C:\Users\rodri\Music\DESTINATION\TEST.txt
+2025-12-28 20:21:16 - INFO - SUCCESS!
+2025-12-28 20:21:16 - INFO - Scheduler running (Ctrl+C to stop)
+2025-12-28 20:21:18 - INFO - Stopped
+2025-12-28 20:21:38 - INFO - ==================================================
+2025-12-28 20:21:38 - INFO - FILE WATCHER STARTED
+2025-12-28 20:21:38 - INFO - Watch: C:\Users\rodri\Music\TARGET
+2025-12-28 20:21:38 - INFO - Target: TEST.txt
+2025-12-28 20:21:38 - INFO - Dest: C:\Users\rodri\Music\DESTINATION
+2025-12-28 20:21:38 - INFO - Schedule: ['09:00', '12:00', '17:00', '20:23']
+2025-12-28 20:21:38 - INFO - ==================================================
+2025-12-28 20:21:38 - INFO - Scheduled: 09:00
+2025-12-28 20:21:38 - INFO - Scheduled: 12:00
+2025-12-28 20:21:38 - INFO - Scheduled: 17:00
+2025-12-28 20:21:38 - INFO - Scheduled: 20:23
+2025-12-28 20:21:38 - INFO - ==================================================
+2025-12-28 20:21:38 - INFO - CHECK @ 20:21:38
+2025-12-28 20:21:38 - INFO - ==================================================
+2025-12-28 20:21:38 - INFO - Watch directory OK: C:\Users\rodri\Music\TARGET
+2025-12-28 20:21:38 - INFO - Found: TEST.txt (10 bytes)
+2025-12-28 20:21:38 - INFO - Copied to: C:\Users\rodri\Music\DESTINATION\TEST.txt
+2025-12-28 20:21:38 - INFO - SUCCESS!
+2025-12-28 20:21:38 - INFO - Scheduler running (Ctrl+C to stop)
+2025-12-28 20:23:38 - INFO - ==================================================
+2025-12-28 20:23:38 - INFO - CHECK @ 20:23:38
+2025-12-28 20:23:38 - INFO - ==================================================
+2025-12-28 20:23:38 - INFO - Watch directory OK: C:\Users\rodri\Music\TARGET
+2025-12-28 20:23:38 - INFO - Found: TEST.txt (10 bytes)
+2025-12-28 20:23:38 - INFO - Copied to: C:\Users\rodri\Music\DESTINATION\TEST.txt
+2025-12-28 20:23:38 - INFO - SUCCESS!
