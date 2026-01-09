@@ -624,6 +624,93 @@ def robust_conciliation_duplicates_allowed():
         
         df_full_reconciled = pd.concat([df_full_reconciled, total_row], ignore_index=True)
 
+    # --- 4d. Net Balanced / Self-Corrected Files Logic ---
+    print("Checking for Net Balanced files (Self-Closing Notes)...")
+    net_balanced_rows = []
+    
+    # Identify files that are NOT fully reconciled but might be balanced
+    # Candidates: Files in pending_claims OR unexpected_refunds
+    candidate_files = set(pending_claims['Accounting_Ref'].unique()) | set(unexpected_refunds['Accounting_Ref_DEBT'].unique())
+    
+    # Exclude files that are already FULLY RECONCILED (though logic above ensures they wouldn't be here if pending/unexpected exist)
+    if not df_full_reconciled.empty and 'DEBTOR FILE' in df_full_reconciled.columns:
+        # Note: df_full_reconciled has renamed columns now
+        fully_reconciled_set = set(df_full_reconciled['DEBTOR FILE'].unique())
+        candidate_files = candidate_files - fully_reconciled_set
+        
+    for filename in candidate_files:
+        if filename == 'TOTAL': continue
+        
+        # 1. Gather Components
+        
+        # A. Pending Claims (Unmatched NOs) -> The "Minus"
+        # Since 'pending_claims' is derived from df_debt, col names are raw
+        # need to verify column names in pending_claims. 
+        # It comes from: pending_claims = df_debt[...]
+        file_pending = pending_claims[pending_claims['Accounting_Ref'] == filename]
+        sum_pending = file_pending['Original Amount'].astype(float).sum()
+        
+        # B. Unexpected Refunds (Matched SIs) -> The "Plus"
+        # It comes from: merged[...]
+        file_unexpected = unexpected_refunds[unexpected_refunds['Accounting_Ref_DEBT'] == filename]
+        # Sum the CREDIT amount because that's what we received (refund)
+        sum_unexpected = file_unexpected['Amt_Float_CREDIT'].sum()
+        
+        # Check Balance: Pending (Should be refunded) == Unexpected (Was refunded "wrongly")
+        # Tolerance 0.01
+        balance_diff = sum_pending - sum_unexpected
+        
+        if abs(balance_diff) < 0.01 and (sum_pending > 0 or sum_unexpected > 0):
+             # IT IS BALANCED!
+             # Generate Breakdown Rows
+             
+             # Add Pending Rows
+             for _, row in file_pending.iterrows():
+                 net_balanced_rows.append({
+                     'Debtor_File': filename,
+                     'Status': 'NET BALANCED',
+                     'Type': 'PENDING_CLAIM',
+                     'Card': row[col_card],
+                     'Operation': row[col_op],
+                     'Amount': float(row['Original Amount']),
+                     'Credit_Ref': 'N/A'
+                 })
+                 
+             # Add Unexpected Rows
+             for _, row in file_unexpected.iterrows():
+                 net_balanced_rows.append({
+                     'Debtor_File': filename,
+                     'Status': 'NET BALANCED',
+                     'Type': 'UNEXPECTED_REFUND',
+                     'Card': row[col_card], # Use raw key
+                     'Operation': row[col_op], # Use raw key
+                     'Amount': row['Amt_Float_CREDIT'],
+                     'Credit_Ref': row['Accounting_Ref_CREDIT']
+                 })
+                 
+             # Add Standard Matched Rows (Context)
+             # We need to find the "normal" matches for this file to show full picture
+             # merged: Accounting_Ref_DEBT == filename, RECUPERAR_DEBT != 'NO' -> Unexpected
+             # merged: Accounting_Ref_DEBT == filename, RECUPERAR_DEBT == 'NO' -> Matched NO (Correct)
+             
+             file_matched_no = merged[
+                 (merged['Accounting_Ref_DEBT'] == filename) & 
+                 (merged[f'{col_recuperar}_DEBT'] == 'NO')
+             ]
+             
+             for _, row in file_matched_no.iterrows():
+                 net_balanced_rows.append({
+                     'Debtor_File': filename,
+                     'Status': 'NET BALANCED',
+                     'Type': 'CORRECTLY_MATCHED',
+                     'Card': row[col_card], 
+                     'Operation': row[col_op], 
+                     'Amount': row['Amt_Float_DEBT'],
+                     'Credit_Ref': row['Accounting_Ref_CREDIT']
+                 })
+
+    df_net_balanced = pd.DataFrame(net_balanced_rows)
+
     # --- 6. EXPORT ---
     try:
         with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
@@ -638,6 +725,9 @@ def robust_conciliation_duplicates_allowed():
                 
             if not df_full_reconciled.empty:
                 df_full_reconciled.to_excel(writer, sheet_name='Fully_Reconciled_Notes', index=False)
+                
+            if not df_net_balanced.empty:
+                df_net_balanced.to_excel(writer, sheet_name='Net_Balanced_Files', index=False)
             
             if not variance_report.empty:
                 variance_report.to_excel(writer, sheet_name='Amount_Variances', index=False)
