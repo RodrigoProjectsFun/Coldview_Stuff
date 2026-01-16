@@ -4,12 +4,35 @@ import glob
 import re
 
 # --- HEADERS CONFIGURATION ---
-COL_CARD = 'TARJETA'               
-COL_OP = 'NUM OPE'
-COL_AMOUNT = 'IMP VISA' 
-COL_RECUPERAR = 'RECUPERAR'
-AMT_FLOAT = 'Amt_Float'
-ACCOUNTING_REF = 'Accounting_Ref'
+# --- HEADERS CONFIGURATION ---
+DEFAULT_CONFIG = {
+    # Input CSV/Excel Headers
+    'COL_CARD': 'TARJETA',
+    'COL_OP': 'NUM OPE',
+    'COL_AMOUNT': 'IMP VISA',
+    'COL_RECUPERAR': 'RECUPERAR',
+    
+    # Internal Technical Columns
+    'AMT_FLOAT': 'Amt_Float',
+    'ACCOUNTING_REF': 'Accounting_Ref',
+    
+    # Output Report Headers (Personalizable)
+    'OUT_DEBTOR_FILE': 'DEBTOR FILE',
+    'OUT_CREDIT_NOTE': 'CREDIT FILE NOTE',
+    'OUT_MATCHED_AMT': 'AMOUNT THAT MATCHED',
+    'OUT_STATUS': 'Status',
+    'OUT_TYPE': 'Type',
+    'OUT_DEBTOR_FILE_COL': 'Debtor_File' # Field name used in net_balanced dictionary
+}
+
+# Keep these for backward compatibility of external scripts referencing them, 
+# but internally use self.config
+COL_CARD = DEFAULT_CONFIG['COL_CARD']
+COL_OP = DEFAULT_CONFIG['COL_OP']
+COL_AMOUNT = DEFAULT_CONFIG['COL_AMOUNT']
+COL_RECUPERAR = DEFAULT_CONFIG['COL_RECUPERAR']
+AMT_FLOAT = DEFAULT_CONFIG['AMT_FLOAT']
+ACCOUNTING_REF = DEFAULT_CONFIG['ACCOUNTING_REF']
 
 DEBT_PATTERN = '*m2d-recu*.xlsx'
 CREDIT_PATTERN = '*m6d-dev*.xlsx'
@@ -20,8 +43,12 @@ class Conciliator:
     Handles the conciliation process between Debt (M2D-RECU) and Credit (M6D-DEV) files.
     """
     
-    def __init__(self, folder_path=DEFAULT_FOLDER_PATH):
+    def __init__(self, folder_path=DEFAULT_FOLDER_PATH, config=None):
         self.folder_path = folder_path
+        self.config = DEFAULT_CONFIG.copy()
+        if config:
+            self.config.update(config)
+            
         self.df_debt = pd.DataFrame()
         self.df_credit = pd.DataFrame()
         self.debt_files = {}
@@ -183,13 +210,13 @@ class Conciliator:
                     name1, name2 = names[i], names[j]
                     df1, df2 = individual_files[name1], individual_files[name2]
                     
-                    keys1 = set(zip(df1[COL_CARD], df1[COL_OP]))
-                    keys2 = set(zip(df2[COL_CARD], df2[COL_OP]))
+                    keys1 = set(zip(df1[self.config['COL_CARD']], df1[self.config['COL_OP']]))
+                    keys2 = set(zip(df2[self.config['COL_CARD']], df2[self.config['COL_OP']]))
                     
                     if keys1 == keys2:
-                        compare_cols = [col for col in df1.columns if col not in [ACCOUNTING_REF]]
-                        df1_sorted = df1[compare_cols].sort_values(by=[COL_CARD, COL_OP]).reset_index(drop=True)
-                        df2_sorted = df2[compare_cols].sort_values(by=[COL_CARD, COL_OP]).reset_index(drop=True)
+                        compare_cols = [col for col in df1.columns if col not in [self.config['ACCOUNTING_REF']]]
+                        df1_sorted = df1[compare_cols].sort_values(by=[self.config['COL_CARD'], self.config['COL_OP']]).reset_index(drop=True)
+                        df2_sorted = df2[compare_cols].sort_values(by=[self.config['COL_CARD'], self.config['COL_OP']]).reset_index(drop=True)
                         
                         if df1_sorted.equals(df2_sorted):
                             issues.append(f"DUPLICATE {label} FILES: '{name1}' and '{name2}' contain IDENTICAL data!")
@@ -345,12 +372,12 @@ class Conciliator:
     def _analyze_variance(self):
         print("Checking for amount variances...")
         variance_check = self.merged.groupby(
-            [f'{ACCOUNTING_REF}_CREDIT', COL_CARD, COL_OP, f'{AMT_FLOAT}_CREDIT']
+            [f"{self.config['ACCOUNTING_REF']}_CREDIT", self.config['COL_CARD'], self.config['COL_OP'], f"{self.config['AMT_FLOAT']}_CREDIT"]
         ).agg(
-            Total_Debts_Covered=(f'{AMT_FLOAT}_DEBT', 'sum')
+            Total_Debts_Covered=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum')
         ).reset_index()
         
-        variance_check['Variance'] = variance_check[f'{AMT_FLOAT}_CREDIT'] - variance_check['Total_Debts_Covered']
+        variance_check['Variance'] = variance_check[f"{self.config['AMT_FLOAT']}_CREDIT"] - variance_check['Total_Debts_Covered']
         self.variance_report = variance_check[variance_check['Variance'].abs() > 0.01].copy()
         
         if not self.variance_report.empty:
@@ -360,22 +387,22 @@ class Conciliator:
             )
             # Collect bad keys to exclude from strict reconciliation
             for _, row in self.variance_report.iterrows():
-                self.bad_credit_keys.add((row[f'{ACCOUNTING_REF}_CREDIT'], row[COL_CARD], row[COL_OP]))
+                self.bad_credit_keys.add((row[f"{self.config['ACCOUNTING_REF']}_CREDIT"], row[self.config['COL_CARD']], row[self.config['COL_OP']]))
                 
             self.variance_report.rename(columns={
-                f'{ACCOUNTING_REF}_CREDIT': 'Credit_File',
-                f'{AMT_FLOAT}_CREDIT': 'Refund_Amount'
+                f"{self.config['ACCOUNTING_REF']}_CREDIT": 'Credit_File',
+                f"{self.config['AMT_FLOAT']}_CREDIT": 'Refund_Amount'
             }, inplace=True)
 
     def _identify_recuperar_scenarios(self):
         print("Applying 'RECUPERAR' business logic...")
         
         # 1. Pending Claims (RECUPERAR='NO' and not matched)
-        self.merged_keys = set(zip(self.merged[COL_CARD], self.merged[COL_OP]))
-        self.df_debt['temp_key'] = list(zip(self.df_debt[COL_CARD], self.df_debt[COL_OP]))
+        self.merged_keys = set(zip(self.merged[self.config['COL_CARD']], self.merged[self.config['COL_OP']]))
+        self.df_debt['temp_key'] = list(zip(self.df_debt[self.config['COL_CARD']], self.df_debt[self.config['COL_OP']]))
         
         self.pending_claims = self.df_debt[
-            (self.df_debt[COL_RECUPERAR] == 'NO') & 
+            (self.df_debt[self.config['COL_RECUPERAR']] == 'NO') & 
             (~self.df_debt['temp_key'].isin(self.merged_keys))
         ].copy()
         
@@ -383,7 +410,7 @@ class Conciliator:
             print(f"  ⚠ Found {len(self.pending_claims)} PENDING CLAIMS")
             
         # 2. Unexpected Refunds (RECUPERAR!='NO' but matched)
-        self.unexpected_refunds = self.merged[self.merged[f'{COL_RECUPERAR}_DEBT'] != 'NO'].copy()
+        self.unexpected_refunds = self.merged[self.merged[f"{self.config['COL_RECUPERAR']}_DEBT"] != 'NO'].copy()
         
         if not self.unexpected_refunds.empty:
             print(f"  ℹ Found {len(self.unexpected_refunds)} UNEXPECTED REFUNDS")
@@ -398,18 +425,18 @@ class Conciliator:
     def _generate_fully_reconciled_summary(self):
         print("Generating Fully Reconciled Summary (Strict Mode)...")
         fully_reconciled_files = []
-        debt_groups = self.df_debt.groupby(ACCOUNTING_REF)
+        debt_groups = self.df_debt.groupby(self.config['ACCOUNTING_REF'])
         
         # Optimization: Pre-compute exclusions sets for O(1) lookup
-        pending_exclusion_set = set(self.pending_claims[ACCOUNTING_REF].unique()) if not self.pending_claims.empty else set()
-        unexpected_exclusion_set = set(self.unexpected_refunds[f'{ACCOUNTING_REF}_DEBT'].unique()) if not self.unexpected_refunds.empty else set()
+        pending_exclusion_set = set(self.pending_claims[self.config['ACCOUNTING_REF']].unique()) if not self.pending_claims.empty else set()
+        unexpected_exclusion_set = set(self.unexpected_refunds[f"{self.config['ACCOUNTING_REF']}_DEBT"].unique()) if not self.unexpected_refunds.empty else set()
         
         for filename, group in debt_groups:
             # Check Exclusions first (fastest check)
             if filename in pending_exclusion_set: continue
             if filename in unexpected_exclusion_set: continue
             
-            total_no = group[group[COL_RECUPERAR] == 'NO']
+            total_no = group[group[self.config['COL_RECUPERAR']] == 'NO']
             if total_no.empty: continue
             
             # Verify 100% Match
@@ -418,34 +445,34 @@ class Conciliator:
             
             # Verify Variance
             relevant_merged = self.merged[
-                (self.merged[f'{ACCOUNTING_REF}_DEBT'] == filename) & 
-                (self.merged[f'{COL_RECUPERAR}_DEBT'] == 'NO')
+                (self.merged[f"{self.config['ACCOUNTING_REF']}_DEBT"] == filename) & 
+                (self.merged[f"{self.config['COL_RECUPERAR']}_DEBT"] == 'NO')
             ]
             
             # Set intersection for variance check (faster than loop)
-            current_keys = set(zip(relevant_merged[f'{ACCOUNTING_REF}_CREDIT'], relevant_merged[COL_CARD], relevant_merged[COL_OP]))
+            current_keys = set(zip(relevant_merged[f"{self.config['ACCOUNTING_REF']}_CREDIT"], relevant_merged[self.config['COL_CARD']], relevant_merged[self.config['COL_OP']]))
             if not current_keys.isdisjoint(self.bad_credit_keys):
                 continue
             
             # Add to Summary
-            creditor_breakdown = relevant_merged.groupby(f'{ACCOUNTING_REF}_CREDIT').agg(
-                Amount_Covered=(f'{AMT_FLOAT}_DEBT', 'sum')
+            creditor_breakdown = relevant_merged.groupby(f"{self.config['ACCOUNTING_REF']}_CREDIT").agg(
+                Amount_Covered=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum')
             ).reset_index()
             
             for _, row in creditor_breakdown.iterrows():
                 fully_reconciled_files.append({
-                    'DEBTOR FILE': filename,
-                    'CREDIT FILE NOTE': row[f'{ACCOUNTING_REF}_CREDIT'],
-                    'AMOUNT THAT MATCHED': row['Amount_Covered']
+                    self.config['OUT_DEBTOR_FILE']: filename,
+                    self.config['OUT_CREDIT_NOTE']: row[f"{self.config['ACCOUNTING_REF']}_CREDIT"],
+                    self.config['OUT_MATCHED_AMT']: row['Amount_Covered']
                 })
                 
         self.fully_reconciled = pd.DataFrame(fully_reconciled_files)
         if not self.fully_reconciled.empty:
-            total_val = self.fully_reconciled['AMOUNT THAT MATCHED'].sum()
+            total_val = self.fully_reconciled[self.config['OUT_MATCHED_AMT']].sum()
             total_row = pd.DataFrame([{
-                'DEBTOR FILE': 'TOTAL', 
-                'CREDIT FILE NOTE': '', 
-                'AMOUNT THAT MATCHED': total_val
+                self.config['OUT_DEBTOR_FILE']: 'TOTAL', 
+                self.config['OUT_CREDIT_NOTE']: '', 
+                self.config['OUT_MATCHED_AMT']: total_val
             }])
             self.fully_reconciled = pd.concat([self.fully_reconciled, total_row], ignore_index=True)
 
@@ -453,15 +480,15 @@ class Conciliator:
         print("Checking for Net Balanced files...")
         rows = []
         
-        candidates = set(self.pending_claims[ACCOUNTING_REF].unique()) | set(self.unexpected_refunds[f'{ACCOUNTING_REF}_DEBT'].unique())
+        candidates = set(self.pending_claims[self.config['ACCOUNTING_REF']].unique()) | set(self.unexpected_refunds[f"{self.config['ACCOUNTING_REF']}_DEBT"].unique())
         
         if not self.fully_reconciled.empty:
-            excluded = set(self.fully_reconciled['DEBTOR FILE'].unique())
+            excluded = set(self.fully_reconciled[self.config['OUT_DEBTOR_FILE']].unique())
             candidates = candidates - excluded
         
         # Optimization: Pre-group to avoid O(N) filtering inside loop
-        pending_map = {k: v for k, v in self.pending_claims.groupby(ACCOUNTING_REF)} if not self.pending_claims.empty else {}
-        unexpected_map = {k: v for k, v in self.unexpected_refunds.groupby(f'{ACCOUNTING_REF}_DEBT')} if not self.unexpected_refunds.empty else {}
+        pending_map = {k: v for k, v in self.pending_claims.groupby(self.config['ACCOUNTING_REF'])} if not self.pending_claims.empty else {}
+        unexpected_map = {k: v for k, v in self.unexpected_refunds.groupby(f"{self.config['ACCOUNTING_REF']}_DEBT")} if not self.unexpected_refunds.empty else {}
         
         for filename in candidates:
             if filename == 'TOTAL': continue
@@ -469,25 +496,40 @@ class Conciliator:
             file_pending = pending_map.get(filename, pd.DataFrame())
             file_unexpected = unexpected_map.get(filename, pd.DataFrame())
             
-            sum_p = file_pending[COL_AMOUNT].astype(float).sum() if not file_pending.empty else 0.0
-            sum_u = file_unexpected[f'{AMT_FLOAT}_CREDIT'].sum() if not file_unexpected.empty else 0.0
+            sum_p = file_pending[self.config['COL_AMOUNT']].astype(float).sum() if not file_pending.empty else 0.0
+            sum_u = file_unexpected[f"{self.config['AMT_FLOAT']}_CREDIT"].sum() if not file_unexpected.empty else 0.0
             
             if abs(sum_p - sum_u) < 0.01 and (sum_p > 0 or sum_u > 0):
                 # IT IS BALANCED
                 if not file_pending.empty:
                     for _, r in file_pending.iterrows():
-                        rows.append({'Debtor_File': filename, 'Status': 'NET BALANCED', 'Type': 'PENDING_CLAIM', 'Amount': float(r[COL_AMOUNT])})
+                        rows.append({
+                            self.config['OUT_DEBTOR_FILE_COL']: filename, 
+                            self.config['OUT_STATUS']: 'NET BALANCED', 
+                            self.config['OUT_TYPE']: 'PENDING_CLAIM', 
+                            self.config['OUT_MATCHED_AMT']: float(r[self.config['COL_AMOUNT']])
+                        })
                 if not file_unexpected.empty:
                     for _, r in file_unexpected.iterrows():
-                        rows.append({'Debtor_File': filename, 'Status': 'NET BALANCED', 'Type': 'UNEXPECTED_REFUND', 'Amount': r[f'{AMT_FLOAT}_CREDIT']})
+                        rows.append({
+                            self.config['OUT_DEBTOR_FILE_COL']: filename, 
+                            self.config['OUT_STATUS']: 'NET BALANCED', 
+                            self.config['OUT_TYPE']: 'UNEXPECTED_REFUND', 
+                            self.config['OUT_MATCHED_AMT']: r[f"{self.config['AMT_FLOAT']}_CREDIT"]
+                        })
                 
                 # Context lookup - could be optimized further but acceptable for now
                 file_matched = self.merged[
-                     (self.merged[f'{ACCOUNTING_REF}_DEBT'] == filename) & 
-                     (self.merged[f'{COL_RECUPERAR}_DEBT'] == 'NO')
+                     (self.merged[f"{self.config['ACCOUNTING_REF']}_DEBT"] == filename) & 
+                     (self.merged[f"{self.config['COL_RECUPERAR']}_DEBT"] == 'NO')
                 ]
                 for _, r in file_matched.iterrows():
-                    rows.append({'Debtor_File': filename, 'Status': 'NET BALANCED', 'Type': 'CORRECTLY_MATCHED', 'Amount': r[f'{AMT_FLOAT}_DEBT']})
+                    rows.append({
+                        self.config['OUT_DEBTOR_FILE_COL']: filename, 
+                        self.config['OUT_STATUS']: 'NET BALANCED', 
+                        self.config['OUT_TYPE']: 'CORRECTLY_MATCHED', 
+                        self.config['OUT_MATCHED_AMT']: r[f"{self.config['AMT_FLOAT']}_DEBT"]
+                    })
                     
         self.net_balanced = pd.DataFrame(rows)
 
@@ -495,12 +537,13 @@ class Conciliator:
         try:
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 # Breakdowns
-                self.merged.groupby([f'{ACCOUNTING_REF}_DEBT', f'{ACCOUNTING_REF}_CREDIT']).agg(
-                    Count=(COL_OP, 'count'), Amount=(f'{AMT_FLOAT}_DEBT', 'sum')
+                # Breakdowns
+                self.merged.groupby([f"{self.config['ACCOUNTING_REF']}_DEBT", f"{self.config['ACCOUNTING_REF']}_CREDIT"]).agg(
+                    Count=(self.config['COL_OP'], 'count'), Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum')
                 ).reset_index().to_excel(writer, sheet_name='By_Debt_File', index=False)
                 
-                self.merged.groupby([f'{ACCOUNTING_REF}_CREDIT', f'{ACCOUNTING_REF}_DEBT']).agg(
-                    Count=(COL_OP, 'count'), Amount=(f'{AMT_FLOAT}_DEBT', 'sum')
+                self.merged.groupby([f"{self.config['ACCOUNTING_REF']}_CREDIT", f"{self.config['ACCOUNTING_REF']}_DEBT"]).agg(
+                    Count=(self.config['COL_OP'], 'count'), Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum')
                 ).reset_index().to_excel(writer, sheet_name='By_Credit_File', index=False)
                 
                 if not self.pending_claims.empty: self.pending_claims.to_excel(writer, sheet_name='Pending_Claims', index=False)
@@ -520,8 +563,8 @@ class Conciliator:
             print(f"ERROR: Close {output_file} and try again.")
             
     def _export_individual_sheets(self, writer):
-        reconciled_debts = self.fully_reconciled['DEBTOR FILE'].unique()
-        reconciled_credits = self.fully_reconciled['CREDIT FILE NOTE'].unique()
+        reconciled_debts = self.fully_reconciled[self.config['OUT_DEBTOR_FILE']].unique()
+        reconciled_credits = self.fully_reconciled[self.config['OUT_CREDIT_NOTE']].unique()
         
         # Write Debt Files
         for fname in reconciled_debts:
