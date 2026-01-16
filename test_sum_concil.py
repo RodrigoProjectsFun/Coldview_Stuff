@@ -60,10 +60,10 @@ class TestSumConcil(unittest.TestCase):
     # =========================================================================
     def test_filename_standardization_m2d_recu(self):
         """Test that M2D-RECU files are standardized correctly"""
-        from sum_concil import robust_conciliation_duplicates_allowed
+        from sum_concil import Conciliator
         
-        # The function is not directly accessible, but we can test via regex
-        import re
+        # Instantiate class
+        c = Conciliator()
         
         test_filenames = [
             ('m2d-recu 01.15.2026.xlsx', 'M2D-RECU 01.15.2026'),
@@ -72,20 +72,13 @@ class TestSumConcil(unittest.TestCase):
         ]
         
         for filename, expected_prefix in test_filenames:
-            name_lower = filename.lower()
-            date_match = re.search(r'(\d+[\.-]\d+[\.-]\d+)', name_lower)
-            date_str = date_match.group(1) if date_match else "NO_DATE"
-            
-            if 'm2d-recu' in name_lower:
-                result = f"M2D-RECU {date_str}"
-            else:
-                result = f"UNKNOWN {filename}"
-            
+            result = c.get_standardized_name(filename)
             self.assertEqual(result, expected_prefix, f"Failed for: {filename}")
 
     def test_filename_standardization_m6d_dev(self):
         """Test that M6D-DEV files are standardized correctly"""
-        import re
+        from sum_concil import Conciliator
+        c = Conciliator()
         
         test_filenames = [
             ('m6d-dev 01.15.2026.xlsx', 'M6D-DEV 01.15.2026'),
@@ -93,27 +86,32 @@ class TestSumConcil(unittest.TestCase):
         ]
         
         for filename, expected_prefix in test_filenames:
-            name_lower = filename.lower()
-            date_match = re.search(r'(\d+[\.-]\d+[\.-]\d+)', name_lower)
-            date_str = date_match.group(1) if date_match else "NO_DATE"
-            
-            if 'm6d-dev' in name_lower:
-                result = f"M6D-DEV {date_str}"
-            else:
-                result = f"UNKNOWN {filename}"
-            
+            result = c.get_standardized_name(filename)
             self.assertEqual(result, expected_prefix, f"Failed for: {filename}")
 
     def test_filename_no_date_extraction(self):
         """Test behavior when filename has no valid date"""
-        import re
+        from sum_concil import Conciliator
         
+        c = Conciliator()
         filename = 'm2d-recu-nodate.xlsx'
-        name_lower = filename.lower()
-        date_match = re.search(r'(\d+[\.-]\d+[\.-]\d+)', name_lower)
-        date_str = date_match.group(1) if date_match else "NO_DATE"
+        result = c.get_standardized_name(filename)
         
-        self.assertEqual(date_str, "NO_DATE")
+        self.assertIn("NO_DATE", result)
+
+    def test_filename_standardization_m6d_dev_vff(self):
+        """Test that M6D-DEV_VFF files are standardized as ACREEDORA"""
+        from sum_concil import Conciliator
+        c = Conciliator()
+        
+        test_filenames = [
+            ('m6d-dev_vff 01.20.2026.xlsx', 'ACREEDORA 01.20.2026'),
+            ('M6D-DEV_VFF-01-20-2026.xlsx', 'ACREEDORA 01-20-2026'),
+        ]
+        
+        for filename, expected_prefix in test_filenames:
+            result = c.get_standardized_name(filename)
+            self.assertEqual(result, expected_prefix, f"Failed for: {filename}")
 
     # =========================================================================
     # TEST 2: DATA LOADING AND CLEANING
@@ -138,8 +136,6 @@ class TestSumConcil(unittest.TestCase):
             self.assertAlmostEqual(result, expected, places=2, 
                                    msg=f"Failed for amount: {raw}")
 
-    def test_card_and_operation_whitespace_stripping(self):
-        """Test that Card and Operation Number fields are stripped of whitespace"""
         test_values = [
             ('  1234  ', '1234'),
             ('ABC-123\n', 'ABC-123'),
@@ -160,23 +156,23 @@ class TestSumConcil(unittest.TestCase):
         """
         # Simulate debt data with DUPLICATES
         df_debt = pd.DataFrame({
-            'Card': ['1234', '1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-001', 'OP-002'],
+            'TARJETA': ['1234', '1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-001', 'OP-002'],
             'Amt_Float': [100.0, 100.0, 200.0],
             'Accounting_Ref': ['M2D-RECU 01.01.2026', 'M2D-RECU 01.01.2026', 'M2D-RECU 01.01.2026']
         })
         
         # Credit has single entry for OP-001
         df_credit = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
             'Amt_Float': [100.0, 200.0],
             'Accounting_Ref': ['M6D-DEV 01.05.2026', 'M6D-DEV 01.05.2026']
         })
         
         merged = pd.merge(
             df_debt, df_credit,
-            on=['Card', 'Operation Number'],
+            on=['TARJETA', 'NUM OPE'],
             how='inner',
             suffixes=('_DEBT', '_CREDIT')
         )
@@ -188,18 +184,18 @@ class TestSumConcil(unittest.TestCase):
     def test_no_matches_returns_empty(self):
         """Test that completely non-matching data produces empty result"""
         df_debt = pd.DataFrame({
-            'Card': ['1111'],
-            'Operation Number': ['OP-AAA'],
+            'TARJETA': ['1111'],
+            'NUM OPE': ['OP-AAA'],
         })
         
         df_credit = pd.DataFrame({
-            'Card': ['9999'],
-            'Operation Number': ['OP-ZZZ'],
+            'TARJETA': ['9999'],
+            'NUM OPE': ['OP-ZZZ'],
         })
         
         merged = pd.merge(
             df_debt, df_credit,
-            on=['Card', 'Operation Number'],
+            on=['TARJETA', 'NUM OPE'],
             how='inner'
         )
         
@@ -215,8 +211,8 @@ class TestSumConcil(unittest.TestCase):
         """
         # 2 debt entries for same Card/Op, 1 credit
         merged = pd.DataFrame({
-            'Card': ['1234', '1234'],
-            'Operation Number': ['OP-001', 'OP-001'],
+            'TARJETA': ['1234', '1234'],
+            'NUM OPE': ['OP-001', 'OP-001'],
             'Amt_Float_DEBT': [100.0, 150.0],
             'Amt_Float_CREDIT': [250.0, 250.0],  # Same credit repeated
             'Accounting_Ref_DEBT': ['M2D-RECU 01.01.2026', 'M2D-RECU 01.01.2026'],
@@ -224,7 +220,7 @@ class TestSumConcil(unittest.TestCase):
         })
         
         debt_breakdown = merged.groupby(['Accounting_Ref_DEBT', 'Accounting_Ref_CREDIT']).agg(
-            Count_Operations=('Operation Number', 'count'),
+            Count_Operations=('NUM OPE', 'count'),
             Total_Conciliated_Amount=('Amt_Float_DEBT', 'sum')
         ).reset_index()
         
@@ -239,17 +235,17 @@ class TestSumConcil(unittest.TestCase):
         """Test that identical DataFrames are flagged as duplicates"""
         # Same data in both
         df1 = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
-            'Original Amount': ['100.00', '200.00'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
+            'IMP VISA': ['100.00', '200.00'],
             'Accounting_Ref': ['M2D-RECU 01.01.2026', 'M2D-RECU 01.01.2026'],
             'Amt_Float': [100.0, 200.0]
         })
         
         df2 = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
-            'Original Amount': ['100.00', '200.00'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
+            'IMP VISA': ['100.00', '200.00'],
             'Accounting_Ref': ['M6D-DEV 01.05.2026', 'M6D-DEV 01.05.2026'],
             'Amt_Float': [100.0, 200.0]
         })
@@ -265,17 +261,17 @@ class TestSumConcil(unittest.TestCase):
     def test_detects_high_key_overlap(self):
         """Test detection of suspiciously high key overlap with same row count"""
         df1 = pd.DataFrame({
-            'Card': ['1234', '5678', '9999'],
-            'Operation Number': ['OP-001', 'OP-002', 'OP-003'],
+            'TARJETA': ['1234', '5678', '9999'],
+            'NUM OPE': ['OP-001', 'OP-002', 'OP-003'],
         })
         
         df2 = pd.DataFrame({
-            'Card': ['1234', '5678', '9999'],
-            'Operation Number': ['OP-001', 'OP-002', 'OP-003'],
+            'TARJETA': ['1234', '5678', '9999'],
+            'NUM OPE': ['OP-001', 'OP-002', 'OP-003'],
         })
         
-        debt_keys = set(zip(df1['Card'], df1['Operation Number']))
-        credit_keys = set(zip(df2['Card'], df2['Operation Number']))
+        debt_keys = set(zip(df1['TARJETA'], df1['NUM OPE']))
+        credit_keys = set(zip(df2['TARJETA'], df2['NUM OPE']))
         
         overlap = debt_keys & credit_keys
         overlap_pct = len(overlap) / max(len(debt_keys), 1) * 100
@@ -297,20 +293,20 @@ class TestSumConcil(unittest.TestCase):
     def test_allows_legitimate_different_files(self):
         """Test that legitimately different files pass validation"""
         df1 = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
             'Amt_Float': [100.0, 200.0]
         })
         
         # Different data
         df2 = pd.DataFrame({
-            'Card': ['9999', '8888'],
-            'Operation Number': ['OP-099', 'OP-098'],
+            'TARJETA': ['9999', '8888'],
+            'NUM OPE': ['OP-099', 'OP-098'],
             'Amt_Float': [500.0, 600.0]
         })
         
-        debt_keys = set(zip(df1['Card'], df1['Operation Number']))
-        credit_keys = set(zip(df2['Card'], df2['Operation Number']))
+        debt_keys = set(zip(df1['TARJETA'], df1['NUM OPE']))
+        credit_keys = set(zip(df2['TARJETA'], df2['NUM OPE']))
         
         overlap = debt_keys & credit_keys
         overlap_pct = len(overlap) / max(len(debt_keys), 1) * 100
@@ -337,31 +333,31 @@ class TestSumConcil(unittest.TestCase):
         """Test detection of two identical files within the DEBT category"""
         # Two debt files with identical data
         file1 = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
-            'Original Amount': ['100.00', '200.00'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
+            'IMP VISA': ['100.00', '200.00'],
             'Accounting_Ref': ['M2D-RECU 01.01.2026', 'M2D-RECU 01.01.2026'],
             'Amt_Float': [100.0, 200.0]
         })
         
         file2 = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
-            'Original Amount': ['100.00', '200.00'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
+            'IMP VISA': ['100.00', '200.00'],
             'Accounting_Ref': ['M2D-RECU 01.02.2026', 'M2D-RECU 01.02.2026'],  # Different date
             'Amt_Float': [100.0, 200.0]
         })
         
         # Check if keys are identical
-        keys1 = set(zip(file1['Card'], file1['Operation Number']))
-        keys2 = set(zip(file2['Card'], file2['Operation Number']))
+        keys1 = set(zip(file1['TARJETA'], file1['NUM OPE']))
+        keys2 = set(zip(file2['TARJETA'], file2['NUM OPE']))
         
         self.assertEqual(keys1, keys2, "Should detect identical operation keys")
         
         # Check if data (excluding metadata) is identical
-        compare_cols = ['Card', 'Operation Number', 'Original Amount', 'Amt_Float']
-        df1_sorted = file1[compare_cols].sort_values(by=['Card', 'Operation Number']).reset_index(drop=True)
-        df2_sorted = file2[compare_cols].sort_values(by=['Card', 'Operation Number']).reset_index(drop=True)
+        compare_cols = ['TARJETA', 'NUM OPE', 'IMP VISA', 'Amt_Float']
+        df1_sorted = file1[compare_cols].sort_values(by=['TARJETA', 'NUM OPE']).reset_index(drop=True)
+        df2_sorted = file2[compare_cols].sort_values(by=['TARJETA', 'NUM OPE']).reset_index(drop=True)
         
         self.assertTrue(df1_sorted.equals(df2_sorted), 
             "Should detect identical data content")
@@ -369,19 +365,19 @@ class TestSumConcil(unittest.TestCase):
     def test_detects_same_keys_different_amounts_within_pile(self):
         """Test detection of files with same operations but different amounts"""
         file1 = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
             'Amt_Float': [100.0, 200.0]  # Original amounts
         })
         
         file2 = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
             'Amt_Float': [150.0, 250.0]  # DIFFERENT amounts - suspicious!
         })
         
-        keys1 = set(zip(file1['Card'], file1['Operation Number']))
-        keys2 = set(zip(file2['Card'], file2['Operation Number']))
+        keys1 = set(zip(file1['TARJETA'], file1['NUM OPE']))
+        keys2 = set(zip(file2['TARJETA'], file2['NUM OPE']))
         
         self.assertEqual(keys1, keys2, "Keys should be identical")
         self.assertFalse(file1['Amt_Float'].equals(file2['Amt_Float']), 
@@ -390,18 +386,18 @@ class TestSumConcil(unittest.TestCase):
     def test_detects_high_overlap_within_pile(self):
         """Test detection of >90% overlap between files in same category"""
         file1 = pd.DataFrame({
-            'Card': ['1234', '5678', '9999', '8888', '7777'],
-            'Operation Number': ['OP-001', 'OP-002', 'OP-003', 'OP-004', 'OP-005'],
+            'TARJETA': ['1234', '5678', '9999', '8888', '7777'],
+            'NUM OPE': ['OP-001', 'OP-002', 'OP-003', 'OP-004', 'OP-005'],
         })
         
         # 4 out of 5 operations overlap (80%) - borderline
         file2 = pd.DataFrame({
-            'Card': ['1234', '5678', '9999', '8888', 'XXXX'],  # Last one different
-            'Operation Number': ['OP-001', 'OP-002', 'OP-003', 'OP-004', 'OP-999'],
+            'TARJETA': ['1234', '5678', '9999', '8888', 'XXXX'],  # Last one different
+            'NUM OPE': ['OP-001', 'OP-002', 'OP-003', 'OP-004', 'OP-999'],
         })
         
-        keys1 = set(zip(file1['Card'], file1['Operation Number']))
-        keys2 = set(zip(file2['Card'], file2['Operation Number']))
+        keys1 = set(zip(file1['TARJETA'], file1['NUM OPE']))
+        keys2 = set(zip(file2['TARJETA'], file2['NUM OPE']))
         
         overlap = keys1 & keys2
         overlap_pct = len(overlap) / max(len(keys1), 1) * 100
@@ -411,18 +407,18 @@ class TestSumConcil(unittest.TestCase):
     def test_allows_different_files_within_pile(self):
         """Test that legitimately different files within same category pass"""
         file1 = pd.DataFrame({
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
         })
         
         # Completely different operations
         file2 = pd.DataFrame({
-            'Card': ['AAAA', 'BBBB'],
-            'Operation Number': ['OP-100', 'OP-200'],
+            'TARJETA': ['AAAA', 'BBBB'],
+            'NUM OPE': ['OP-100', 'OP-200'],
         })
         
-        keys1 = set(zip(file1['Card'], file1['Operation Number']))
-        keys2 = set(zip(file2['Card'], file2['Operation Number']))
+        keys1 = set(zip(file1['TARJETA'], file1['NUM OPE']))
+        keys2 = set(zip(file2['TARJETA'], file2['NUM OPE']))
         
         overlap = keys1 & keys2
         
@@ -431,13 +427,13 @@ class TestSumConcil(unittest.TestCase):
     def test_skips_comparison_for_different_row_counts(self):
         """Test that files with different row counts are not flagged as duplicates"""
         file1 = pd.DataFrame({
-            'Card': ['1234', '5678', '9999'],
-            'Operation Number': ['OP-001', 'OP-002', 'OP-003'],
+            'TARJETA': ['1234', '5678', '9999'],
+            'NUM OPE': ['OP-001', 'OP-002', 'OP-003'],
         })
         
         file2 = pd.DataFrame({
-            'Card': ['1234', '5678'],  # Only 2 rows
-            'Operation Number': ['OP-001', 'OP-002'],
+            'TARJETA': ['1234', '5678'],  # Only 2 rows
+            'NUM OPE': ['OP-001', 'OP-002'],
         })
         
         self.assertNotEqual(len(file1), len(file2), 
@@ -480,42 +476,42 @@ class TestSumConcil(unittest.TestCase):
     def test_detects_empty_card_numbers(self):
         """Test detection of empty/null Card numbers"""
         df = pd.DataFrame({
-            'Card': ['1234', '', None, '5678', ''],
+            'TARJETA': ['1234', '', None, '5678', ''],
         })
         
-        empty_cards = df['Card'].isna().sum() + (df['Card'] == '').sum()
+        empty_cards = df['TARJETA'].isna().sum() + (df['TARJETA'] == '').sum()
         
         self.assertEqual(empty_cards, 3, "Should detect 3 empty/null cards")
 
     def test_detects_empty_operation_numbers(self):
         """Test detection of empty/null Operation Numbers"""
         df = pd.DataFrame({
-            'Operation Number': ['OP-001', '', 'OP-002', None],
+            'NUM OPE': ['OP-001', '', 'OP-002', None],
         })
         
-        empty_ops = df['Operation Number'].isna().sum() + (df['Operation Number'] == '').sum()
+        empty_ops = df['NUM OPE'].isna().sum() + (df['NUM OPE'] == '').sum()
         
         self.assertEqual(empty_ops, 2, "Should detect 2 empty/null operations")
 
     def test_detects_whitespace_only_values(self):
         """Test detection of whitespace-only Card numbers"""
         df = pd.DataFrame({
-            'Card': ['1234', '   ', '\t', '5678', '  \n  '],
+            'TARJETA': ['1234', '   ', '\t', '5678', '  \n  '],
         })
         
-        whitespace_cards = (df['Card'].str.strip() == '').sum()
+        whitespace_cards = (df['TARJETA'].str.strip() == '').sum()
         
         self.assertEqual(whitespace_cards, 3, "Should detect 3 whitespace-only cards")
 
     def test_detects_internal_duplicates(self):
         """Test detection of duplicate key combinations within same source file"""
         df = pd.DataFrame({
-            'Card': ['1234', '1234', '5678', '5678', '5678'],
-            'Operation Number': ['OP-001', 'OP-001', 'OP-002', 'OP-002', 'OP-002'],
+            'TARJETA': ['1234', '1234', '5678', '5678', '5678'],
+            'NUM OPE': ['OP-001', 'OP-001', 'OP-002', 'OP-002', 'OP-002'],
             'Accounting_Ref': ['File1', 'File1', 'File1', 'File1', 'File1'],  # Same source
         })
         
-        dup_check = df.groupby(['Card', 'Operation Number', 'Accounting_Ref']).size()
+        dup_check = df.groupby(['TARJETA', 'NUM OPE', 'Accounting_Ref']).size()
         internal_dups = dup_check[dup_check > 1]
         
         self.assertEqual(len(internal_dups), 2, 
@@ -527,21 +523,21 @@ class TestSumConcil(unittest.TestCase):
     def test_calculates_orphaned_debts(self):
         """Test identification of debts without matching credits"""
         df_debt = pd.DataFrame({
-            'Card': ['1234', '5678', '9999'],
-            'Operation Number': ['OP-001', 'OP-002', 'OP-003'],
+            'TARJETA': ['1234', '5678', '9999'],
+            'NUM OPE': ['OP-001', 'OP-002', 'OP-003'],
             'Amt_Float': [100.0, 200.0, 300.0]
         })
         
         df_credit = pd.DataFrame({
-            'Card': ['1234'],  # Only matches first debt
-            'Operation Number': ['OP-001'],
+            'TARJETA': ['1234'],  # Only matches first debt
+            'NUM OPE': ['OP-001'],
             'Amt_Float': [100.0]
         })
         
-        merged = pd.merge(df_debt, df_credit, on=['Card', 'Operation Number'])
+        merged = pd.merge(df_debt, df_credit, on=['TARJETA', 'NUM OPE'])
         
-        merged_keys = set(zip(merged['Card'], merged['Operation Number']))
-        all_debt_keys = set(zip(df_debt['Card'], df_debt['Operation Number']))
+        merged_keys = set(zip(merged['TARJETA'], merged['NUM OPE']))
+        all_debt_keys = set(zip(df_debt['TARJETA'], df_debt['NUM OPE']))
         orphaned_debt_keys = all_debt_keys - merged_keys
         
         # Orphaned debts are INFORMATIONAL ONLY (not all debts have been refunded yet)
@@ -555,19 +551,19 @@ class TestSumConcil(unittest.TestCase):
         Every credit (refund) MUST have a corresponding debt (original charge).
         """
         df_debt = pd.DataFrame({
-            'Card': ['1234'],
-            'Operation Number': ['OP-001'],
+            'TARJETA': ['1234'],
+            'NUM OPE': ['OP-001'],
         })
         
         df_credit = pd.DataFrame({
-            'Card': ['1234', 'AAAA', 'BBBB'],  # 2 credits won't match - CRITICAL ERROR!
-            'Operation Number': ['OP-001', 'OP-100', 'OP-200'],
+            'TARJETA': ['1234', 'AAAA', 'BBBB'],  # 2 credits won't match - CRITICAL ERROR!
+            'NUM OPE': ['OP-001', 'OP-100', 'OP-200'],
         })
         
-        merged = pd.merge(df_debt, df_credit, on=['Card', 'Operation Number'])
+        merged = pd.merge(df_debt, df_credit, on=['TARJETA', 'NUM OPE'])
         
-        merged_keys = set(zip(merged['Card'], merged['Operation Number']))
-        all_credit_keys = set(zip(df_credit['Card'], df_credit['Operation Number']))
+        merged_keys = set(zip(merged['TARJETA'], merged['NUM OPE']))
+        all_credit_keys = set(zip(df_credit['TARJETA'], df_credit['NUM OPE']))
         orphaned_credit_keys = all_credit_keys - merged_keys
         
         # Orphaned credits are CRITICAL - should block conciliation
@@ -598,20 +594,20 @@ class TestSumConcil(unittest.TestCase):
     def test_all_credits_matched_is_valid(self):
         """Test that 100% credit match rate is the expected valid state"""
         df_debt = pd.DataFrame({
-            'Card': ['1234', '5678', '9999'],
-            'Operation Number': ['OP-001', 'OP-002', 'OP-003'],
+            'TARJETA': ['1234', '5678', '9999'],
+            'NUM OPE': ['OP-001', 'OP-002', 'OP-003'],
         })
         
         # All credits have matching debts
         df_credit = pd.DataFrame({
-            'Card': ['1234', '5678'],  # Subset of debts - valid!
-            'Operation Number': ['OP-001', 'OP-002'],
+            'TARJETA': ['1234', '5678'],  # Subset of debts - valid!
+            'NUM OPE': ['OP-001', 'OP-002'],
         })
         
-        merged = pd.merge(df_debt, df_credit, on=['Card', 'Operation Number'])
+        merged = pd.merge(df_debt, df_credit, on=['TARJETA', 'NUM OPE'])
         
-        merged_keys = set(zip(merged['Card'], merged['Operation Number']))
-        all_credit_keys = set(zip(df_credit['Card'], df_credit['Operation Number']))
+        merged_keys = set(zip(merged['TARJETA'], merged['NUM OPE']))
+        all_credit_keys = set(zip(df_credit['TARJETA'], df_credit['NUM OPE']))
         orphaned_credit_keys = all_credit_keys - merged_keys
         
         # No orphaned credits = valid state
@@ -621,13 +617,13 @@ class TestSumConcil(unittest.TestCase):
     def test_orphan_amount_calculation(self):
         """Test that orphaned record amounts are calculated correctly"""
         df = pd.DataFrame({
-            'Card': ['1234', '5678', '9999'],
-            'Operation Number': ['OP-001', 'OP-002', 'OP-003'],
+            'TARJETA': ['1234', '5678', '9999'],
+            'NUM OPE': ['OP-001', 'OP-002', 'OP-003'],
             'Amt_Float': [100.0, 200.0, 300.0]
         })
         
         orphaned_keys = {('5678', 'OP-002'), ('9999', 'OP-003')}
-        orphaned_df = df[df.apply(lambda x: (x['Card'], x['Operation Number']) in orphaned_keys, axis=1)]
+        orphaned_df = df[df.apply(lambda x: (x['TARJETA'], x['NUM OPE']) in orphaned_keys, axis=1)]
         
         orphaned_total = orphaned_df['Amt_Float'].sum()
         
@@ -640,11 +636,11 @@ class TestSumConcil(unittest.TestCase):
         """Simulate file with missing Card or Operation Number columns"""
         df = pd.DataFrame({
             'Wrong_Column': ['data'],
-            'Original Amount': ['100.00']
+            'IMP VISA': ['100.00']
         })
         
-        col_card = 'Card'
-        col_op = 'Operation Number'
+        col_card = 'TARJETA'
+        col_op = 'NUM OPE'
         
         has_required = col_card in df.columns and col_op in df.columns
         self.assertFalse(has_required, "Should detect missing required columns")
@@ -665,11 +661,11 @@ class TestSumConcil(unittest.TestCase):
         long_id = '12345678901234567890'
         
         # Simulate loading as string
-        df = pd.DataFrame({'Card': [long_id]}, dtype=str)
-        self.assertEqual(df['Card'].iloc[0], long_id)
+        df = pd.DataFrame({'TARJETA': [long_id]}, dtype=str)
+        self.assertEqual(df['TARJETA'].iloc[0], long_id)
         
         # If loaded as numeric, it could lose precision
-        df_numeric = pd.DataFrame({'Card': [int(long_id[:15])]})  # Truncate for valid int
+        df_numeric = pd.DataFrame({'TARJETA': [int(long_id[:15])]})  # Truncate for valid int
         # This would cause issues if compared
 
     # =========================================================================
@@ -677,7 +673,8 @@ class TestSumConcil(unittest.TestCase):
     # =========================================================================
     def test_glob_filter_excludes_wrong_files(self):
         """Test that the secondary filter correctly excludes non-matching files"""
-        import glob
+        from sum_concil import Conciliator
+        c = Conciliator()
         
         # Simulate glob results that might include wrong files
         fake_files = [
@@ -686,7 +683,7 @@ class TestSumConcil(unittest.TestCase):
             'accounting_files/random_m2d-recufile.xlsx',  # Should match DEBT
         ]
         
-        # Filter for DEBT files
+        # We can test the logic used inside _load_pile for filtering
         debt_keyword = 'm2d-recu'
         filtered = [f for f in fake_files if debt_keyword in os.path.basename(f).lower()]
         
@@ -750,16 +747,16 @@ class TestIntegration(unittest.TestCase):
         """Integration test: Full workflow with matching debt/credit files"""
         # Create debt file
         self._create_test_excel('m2d-recu 01.01.2026.xlsx', {
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
-            'Original Amount': ['$100.00', '$200.00']
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
+            'IMP VISA': ['$100.00', '$200.00']
         })
         
         # Create credit file
         self._create_test_excel('m6d-dev 01.05.2026.xlsx', {
-            'Card': ['1234', '5678'],
-            'Operation Number': ['OP-001', 'OP-002'],
-            'Original Amount': ['$100.00', '$200.00']
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
+            'IMP VISA': ['$100.00', '$200.00']
         })
         
         # The full function would need folder_path modification to run
