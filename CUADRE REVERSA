@@ -1,0 +1,25 @@
+graph TD
+    %% Estilos de Nodos
+    classDef reporte fill:#bbdefb,stroke:#2196f3,stroke-width:2px;
+    classDef error fill:#ffcdd2,stroke:#f44336,stroke-width:2px;
+    classDef solucion fill:#c8e6c9,stroke:#4caf50,stroke-width:2px;
+
+    subgraph Problemática [Fallo]
+        A[Inicio: Reversa en Reporte JP1PVB13I]:::reporte --> B[Falla: Ausencia de Numero de Operacion]:::error
+        B --> C[Error POS: Agrupa operaciones de tarjeta por similitud de vacios]:::error
+        C --> D[Consecuencia: Abono errado y omision de registros inferiores]:::error
+    end
+
+    subgraph Analisis [Cruce de Reportes via ARN]
+        D --> E[Criterio de Cruce: Numero de ARN unico]
+        E --> F[Comparar 13I contra JP1PVB5RK y JP1PVB5RJ]:::reporte
+        F --> G{Estado del ARN}
+    end
+
+    subgraph Solucion [Acciones de Cuadre]
+        G -- No existe en 5RK/5RJ --> H[Operaciones validas en 13I no abonadas]:::reporte
+        H --> I[Ejecutar Abono de operaciones faltantes]:::solucion
+
+        G -- Duplicado en 5RK/5RJ --> J[Operacion aparece dos veces en reportes de abono]:::error
+        J --> K[Recuperar una de las operaciones duplicadas]:::solucion
+    end
