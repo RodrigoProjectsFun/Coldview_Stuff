@@ -1,0 +1,53 @@
+graph TD
+    %% --- PASO 1: EL ABONO INICIAL ---
+    subgraph Paso_1 ["PASO 1: EL ABONO (B1)"]
+        direction TB
+        B1["<b>OPERACIÓN B1</b><br/>(Abono en Cuenta)"]
+        Cliente[("<b>CUENTA CLIENTE</b><br/>Recibe Dinero (+100)")]
+        
+        B1 -->|"Dinero Depositado"| Cliente
+    end
+
+    %% --- PASO 2: LA CONFIRMACIÓN FALLIDA ---
+    subgraph Paso_2 ["PASO 2: LA CONFIRMACIÓN (B2)"]
+        direction TB
+        B2["<b>CONFIRMACIÓN B2</b><br/>(Respaldo de Fondos)"]
+        Incoming["Reporte INCOMING<br/>JP1PVB12M"]
+        Contabilidad[("<b>CONTABILIDAD</b><br/>Registro de Fondos")]
+        Cuadre["<b>CUADRE OPERATIVO</b><br/>(Conciliación)"]
+
+        B2 --> Incoming
+        Incoming -->|"✅ OK: Se registra"| Contabilidad
+        Incoming -.->|"❌ ERROR: No baja"| Cuadre
+    end
+
+    %% --- PASO 3: LA LÓGICA ERRÓNEA ---
+    subgraph Paso_3 ["PASO 3: CONCILIACIÓN Y CASTIGO"]
+        B1 --> Cuadre
+        
+        Cuadre --> Decision{"¿Existe B2?"}
+        Decision -- "NO" --> M2D_Trigger["Asume Abono Incorrecto"]
+        
+        M2D_Trigger -->|"Espera 2 Días"| Proceso_M2D["<b>PROCESO M2D</b><br/>(Recuperación)"]
+    end
+
+    %% --- RESULTADO FINAL ---
+    subgraph Paso_4 ["PASO 4: EL DESCUADRE (Impacto)"]
+        Proceso_M2D -->|"⛔ COBRO"| Cliente
+        
+        Contabilidad --> Banco_Saco(("<b>BOLSA DEL BANCO</b>"))
+        Proceso_M2D -->|"Dinero Recuperado"| Banco_Saco
+        
+        Banco_Saco --> Error["<b>DESCUADRE ACREEDOR</b><br/>El banco tiene una B2 huerfana<br/>"]
+    end
+
+    %% Estilos
+    classDef abono fill:#c8e6c9,stroke:#2e7d32,stroke-width:2px;
+    classDef cobro fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px;
+    classDef sistema fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef error fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,stroke-dasharray: 5 5;
+
+    class B1,Cliente abono;
+    class Proceso_M2D,M2D_Trigger,Error cobro;
+    class B2,Contabilidad,Banco_Saco sistema;
+    class Incoming error;
