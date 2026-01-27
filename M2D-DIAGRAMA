@@ -1,0 +1,48 @@
+graph TD
+    %% Nodos de Entrada
+    subgraph Inputs [Entradas del Proceso]
+        B1[Operación Autorizada (b1)]
+        B2[Confirmación/Abono (b2)]
+    end
+
+    %% Nodo de Decisión Principal
+    Conciliacion{¿Concilian b1 y b2?}
+
+    %% Flujo Normal
+    B1 --> Conciliacion
+    B2 --> Conciliacion
+    Conciliacion -- Sí --> Exito[Conciliación Exitosa]
+
+    %% Flujo de Error (Problemática)
+    Conciliacion -- No --> Conflict_Zone
+
+    subgraph Conflict_Zone [PROBLEMÁTICA DETECTADA]
+        direction TB
+        Error[Error de Conciliación]
+        Causa[<b>Colisión de Identificadores</b><br/>Mismo N° Operación en b1 y b2<br/>pero MONTOS diferentes]
+        
+        Error --> Causa
+        Causa -->|Representan| Realidad[Son 2 operaciones distintas<br/>con el mismo ID]
+    end
+
+    %% Salida a Reportes
+    subgraph Reportes [Distribución en Reportes Mainframe]
+        direction TB
+        
+        Realidad -- b1 No Conciliada --> R_I21[<b>REPORTE M2D</b><br/>JP1PVB43I21<br/>(Recuperación de Abono)]
+        
+        Realidad -- Abono No Conciliado --> R_I22[<b>REPORTE M6D</b><br/>JP1PVB43I22<br/>(Abonos con conflicto)]
+        
+        B2_Pendiente[Abonos Nuevos / Sin Procesar] -.-> R_I16[<b>REPORTE PENDIENTE</b><br/>JP1PVB43I16<br/>(Cola de espera)]
+    end
+
+    %% Estilos para facilitar la lectura
+    classDef inputs fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef process fill:#fff9c4,stroke:#fbc02d,stroke-width:2px;
+    classDef reports fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px;
+    classDef pending fill:#e0e0e0,stroke:#616161,stroke-width:2px,stroke-dasharray: 5 5;
+
+    class B1,B2 inputs;
+    class Causa,Realidad process;
+    class R_I21,R_I22 reports;
+    class R_I16 pending;
