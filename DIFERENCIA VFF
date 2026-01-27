@@ -1,0 +1,43 @@
+graph TD
+    %% --- ENTRADAS ---
+    subgraph Entrada ["DIFERENCIA VFF"]
+        B1["B1: Autorización<br/>(Monto X)"]
+        B2["B2: Confirmación<br/>(Monto Y)"]
+        
+        Comparador{"¿B1 vs B2?"}
+        
+        B1 --> Comparador
+        B2 --> Comparador
+    end
+
+    %% --- ESCENARIO 1: CONFIRMACIÓN MAYOR (b2 > b1) ---
+    subgraph Caso_Exceso ["CASO 1: Confirmación Mayor (b2 > b1)"]
+        direction TB
+        Comparador -- "b2 es MAYOR que b1" --> Delta1[/"Diferencia (Sobrante b2)"/]
+        
+        Delta1 -->|Se trata como deuda/error?| Wait2["Espera: 2 Días"]
+        Wait2 --> M2D["Proceso M2D"]
+        M2D --> I21["<b>REPORTE M2D (I21)</b><br/>La diferencia termina aquí"]
+    end
+
+    %% --- ESCENARIO 2: AUTORIZACIÓN MAYOR (b1 > b2) ---
+    subgraph Caso_Deficit ["CASO 2: Autorización Mayor (b1 > b2)"]
+        direction TB
+        Comparador -- "b1 es MAYOR que b2" --> Delta2[/"Diferencia (Faltante/Resto)"/]
+        
+        Delta2 --> I16["<b>REPORTE PENDIENTE (I16)</b><br/>(Sala de Espera)"]
+        
+        I16 -->|Pasaron 6 Días| M6D["Proceso M6D"]
+        M6D --> I22["<b>REPORTE M6D (I22)</b><br/>La diferencia termina aquí"]
+    end
+
+    %% Estilos
+    classDef m2d fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px;
+    classDef m6d fill:#bbdefb,stroke:#0d47a1,stroke-width:2px;
+    classDef wait fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef input fill:#e0e0e0,stroke:#616161,stroke-width:1px;
+
+    class I21,M2D m2d;
+    class I22,M6D m6d;
+    class I16 wait;
+    class B1,B2,Comparador input;
