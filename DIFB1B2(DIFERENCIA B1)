@@ -1,0 +1,30 @@
+graph TD
+    %% Estilos de Nodos
+    classDef reporte fill:#bbdefb,stroke:#2196f3,stroke-width:2px;
+    classDef error fill:#ffcdd2,stroke:#f44336,stroke-width:2px;
+    classDef solucion fill:#c8e6c9,stroke:#4caf50,stroke-width:2px;
+
+    subgraph Fase_Inicial [Fase Inicial y Registro]
+        A[Inicio: Autorizacion B1 no concilia] --> B[Accion Sistema: Generacion devolucion automatica]
+        B --> C[Reporte JP1PVB07I]:::reporte
+    end
+
+    subgraph Fase_Error [Falla y Consecuencia]
+        D[Falla: El sistema NO avisa al POS]:::error --> E[Reaccion POS: Reintento de Abono]:::error
+        E --> F[Consecuencia: Diferencia B1 Deudora - Doble operacion]:::error
+    end
+
+    subgraph Fase_Resolucion [Solucion]
+        F --> G{Analisis de Reporte}
+        
+        G --> CaseA[Caso A: Recupero]
+        CaseA --> H[Presente en Reporte JP1PVB43I12 -Pendiente- y en 07I]:::reporte
+        H --> I[Marcar Concil en 43I12 y Recuperar dinero del 07I]:::solucion
+
+        G --> CaseB[Caso B: Perdida / Gasto]
+        CaseB --> J[Presente en 07I pero abono fisico fallo]:::reporte
+        J --> K[Marcar Concil y enviar a Cuenta de Gastos del Banco]:::solucion
+    end
+
+    %% Conexiones entre subgrafos
+    C --> D
