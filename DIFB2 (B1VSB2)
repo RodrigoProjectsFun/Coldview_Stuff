@@ -1,0 +1,57 @@
+graph TD
+    %% --- FASE 1: EL ORIGEN DEL PROBLEMA ---
+    subgraph Origen ["FASE 1: EL FALLO TÉCNICO"]
+        Role_B1["<b>B1: AUTORIZACIÓN (Acreedora)</b><br/>(El dinero para pagar)"]
+        Role_B2["<b>B2: CONFIRMACIÓN (Deudora)</b><br/>(La deuda/cargo)"]
+
+        Role_B2 --> Incoming["<b>REPORTE INCOMING</b><br/>JP1PVB12M"]
+        Incoming -.->|❌ FALLO: NO BAJA| Cuadre["<b>CUADRE OPERATIVO</b><br/>(Conciliación)"]
+        
+        Role_B1 --> Cuadre
+    end
+
+    %% --- FASE 2: EL TIEMPO (EL FACTOR CLAVE) ---
+    subgraph Gestion_Pendientes ["FASE 2: LA ESPERA DE LA B1"]
+        Cuadre -->|B1 queda sola| Rep_Pendientes["<b>REPORTE PENDIENTES</b><br/>JP1PVB43I12"]
+        
+        Rep_Pendientes --> Reloj{{"¿CUÁNTO TIEMPO<br/>HA PASADO?"}}
+    end
+
+    %% --- CAMINO A: MENOS DE 30 DÍAS (SOLUCIÓN FÁCIL) ---
+    subgraph Escenario_A ["ESCENARIO A: < 30 DÍAS"]
+        direction TB
+        Reloj -- "Menos de 30 días" --> Estado_B1_Viva["<b>B1 VIVA (RETENIDA)</b><br/>El dinero aún está en el Banco"]
+        
+        Incoming -.->|B2 Huérfana| Match_Manual
+        Estado_B1_Viva --> Match_Manual
+        
+        Match_Manual["<b>SOLUCIÓN: CONCILIACIÓN MANUAL</b><br/>(CONCILIAR B1 vs B2)"]
+    end
+
+    %% --- CAMINO B: MÁS DE 30 DÍAS (EL PROBLEMA FINANCIERO) ---
+    subgraph Escenario_B ["ESCENARIO B: > 30 DÍAS"]
+        direction TB
+        Reloj -- "Más de 30 días" --> Rep_Devolucion["<b>DEVOLUCIÓN AUTOMÁTICA</b><br/>JP1PVB07I"]
+        
+        Rep_Devolucion --> Efecto_Reverso["<b>B1 REVERSADA (Acreedor=0)</b><br/>El dinero regresó al cliente"]
+        
+        Incoming -.->|B2 Sigue Viva| Diferencia
+        Efecto_Reverso --> Diferencia
+        
+        Diferencia["<b>DIFERENCIA DEUDORA</b><br/>(El Banco tiene la deuda sin fondos)"]
+        
+        Diferencia --> Solucion_Cobro["<b>SOLUCIÓN: NUEVO COBRO</b><br/>(Debitar manualmente al cliente)"]
+    end
+
+    %% ESTILOS VISUALES
+    classDef acreedor fill:#e8f5e9,stroke:#2e7d32,stroke-width:2px;
+    classDef deudor fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px;
+    classDef fallo fill:#fff9c4,stroke:#fbc02d,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef proceso fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef solucion fill:#b2dfdb,stroke:#00695c,stroke-width:2px;
+
+    class Role_B1,Estado_B1_Viva,Rep_Pendientes,Rep_Devolucion acreedor;
+    class Role_B2,Incoming,Diferencia,Efecto_Reverso,Solucion_Cobro deudor;
+    class Cuadre proceso;
+    class Match_Manual solucion;
+    class Reloj fallo;
