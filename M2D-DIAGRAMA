@@ -1,48 +1,39 @@
 graph TD
-    %% Nodos de Entrada
-    subgraph Inputs [Entradas del Proceso]
-        B1[Operación Autorizada (b1)]
-        B2[Confirmación/Abono (b2)]
+    %% --- EL PROBLEMA DE ORIGEN ---
+    subgraph Origen ["M2D PROBLEMATICA"]
+        B1["Operaciones (B1)<br/>(Individuales)"]
+        B2["Confirmaciones (B2)<br/>(Se agrupan por mismo Num Ope)"]
+        
+        B1 -- "Deberían conciliar con" --> B2
+        B2 -.->|"❌ NO CONCILIA<br/>(Montos no coinciden)"| B1
     end
 
-    %% Nodo de Decisión Principal
-    Conciliacion{¿Concilian b1 y b2?}
+    %% --- LA SEPARACIÓN ---
+    B1 --> Camino_B1
+    B2 --> Camino_B2
 
-    %% Flujo Normal
-    B1 --> Conciliacion
-    B2 --> Conciliacion
-    Conciliacion -- Sí --> Exito[Conciliación Exitosa]
-
-    %% Flujo de Error (Problemática)
-    Conciliacion -- No --> Conflict_Zone
-
-    subgraph Conflict_Zone [PROBLEMÁTICA DETECTADA]
+    %% --- CAMINO IZQUIERDO: B1 (DEUDA) ---
+    subgraph Ruta_B1 ["Ruta B1 (Autorizaciones)"]
         direction TB
-        Error[Error de Conciliación]
-        Causa[<b>Colisión de Identificadores</b><br/>Mismo N° Operación en b1 y b2<br/>pero MONTOS diferentes]
+        Camino_B1("B1 sin conciliación")
         
-        Error --> Causa
-        Causa -->|Representan| Realidad[Son 2 operaciones distintas<br/>con el mismo ID]
+        Camino_B1 -->|Espera 2 Días| I21["<b>REPORTE M2D (I21)</b><br/>Recuperación de Abono"]
     end
 
-    %% Salida a Reportes
-    subgraph Reportes [Distribución en Reportes Mainframe]
+    %% --- CAMINO DERECHO: B2 (DINERO) ---
+    subgraph Ruta_B2 ["Ruta B2 (Abonos)"]
         direction TB
+        Camino_B2("B2 no conciliado")
         
-        Realidad -- b1 No Conciliada --> R_I21[<b>REPORTE M2D</b><br/>JP1PVB43I21<br/>(Recuperación de Abono)]
-        
-        Realidad -- Abono No Conciliado --> R_I22[<b>REPORTE M6D</b><br/>JP1PVB43I22<br/>(Abonos con conflicto)]
-        
-        B2_Pendiente[Abonos Nuevos / Sin Procesar] -.-> R_I16[<b>REPORTE PENDIENTE</b><br/>JP1PVB43I16<br/>(Cola de espera)]
+        Camino_B2 --> I16["<b>REPORTE (I16)</b><br/>(Sala de Espera)"]
+        I16 -->|Espera 6 Días| I22["<b>REPORTE M6D (I22)</b><br/>Abonos no aplicados"]
     end
 
-    %% Estilos para facilitar la lectura
-    classDef inputs fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
-    classDef process fill:#fff9c4,stroke:#fbc02d,stroke-width:2px;
-    classDef reports fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px;
-    classDef pending fill:#e0e0e0,stroke:#616161,stroke-width:2px,stroke-dasharray: 5 5;
+    %% Estilos simples
+    classDef error fill:#ffcdd2,stroke:#b71c1c,stroke-width:2px;
+    classDef wait fill:#fff9c4,stroke:#fbc02d,stroke-width:2px;
+    classDef normal fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
 
-    class B1,B2 inputs;
-    class Causa,Realidad process;
-    class R_I21,R_I22 reports;
-    class R_I16 pending;
+    class I21,I22 error;
+    class I16 wait;
+    class B1,B2 normal;
