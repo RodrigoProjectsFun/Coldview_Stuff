@@ -1,230 +1,41 @@
 import asyncio
-import os
-import logging
-import time
-from datetime import datetime, timedelta
-from urllib.parse import urlparse
 from playwright.async_api import async_playwright
-import httpx
 
-# --- CONFIGURACIÓN ---
-URL_OBJETIVO = "https://fast.com"  # Cambiar a tu sitio objetivo
-INTERVALO = 5                      # Segundos entre capturas de pantalla
-NOMBRE_CARPETA = "screenshots"
-DURACION_MAXIMA_MINUTOS = 120      # Duración máxima de ejecución (2 horas)
-MAX_REINTENTOS = 3                 # Número máximo de reintentos
-BACKOFF_INICIAL = 2                # Segundos iniciales para backoff exponencial
-# ---------------------
+TARGET_URL = "https://your-blocked-site.com"
 
-# --- CONFIGURACIÓN DE LOGGING ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('grafana_screens.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-# ---------------------------------
-
-
-def validar_url(url: str) -> bool:
-    """
-    Valida que la URL tenga un formato correcto y sea accesible.
-    
-    Args:
-        url: La URL a validar
-        
-    Returns:
-        True si la URL es válida y accesible, False en caso contrario
-    """
-    # 1. Validar formato de URL
-    try:
-        resultado = urlparse(url)
-        if not all([resultado.scheme, resultado.netloc]):
-            logger.error(f"URL con formato inválido: {url}")
-            return False
-        if resultado.scheme not in ['http', 'https']:
-            logger.error(f"Esquema de URL no soportado: {resultado.scheme}")
-            return False
-    except Exception as e:
-        logger.error(f"Error al parsear URL: {e}")
-        return False
-    
-    # 2. Verificar accesibilidad
-    logger.info(f"Verificando accesibilidad de {url}...")
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            response = client.head(url, follow_redirects=True)
-            if response.status_code < 400:
-                logger.info(f"URL accesible (código: {response.status_code})")
-                return True
-            else:
-                logger.warning(f"URL respondió con código de error: {response.status_code}")
-                return False
-    except httpx.TimeoutException:
-        logger.error(f"Timeout al intentar acceder a {url}")
-        return False
-    except httpx.ConnectError:
-        logger.error(f"No se pudo conectar a {url}")
-        return False
-    except Exception as e:
-        logger.error(f"Error al verificar URL: {e}")
-        return False
-
-
-async def navegar_con_reintentos(page, url: str, max_reintentos: int = MAX_REINTENTOS) -> bool:
-    """
-    Navega a una URL con reintentos y backoff exponencial.
-    
-    Args:
-        page: Página de Playwright
-        url: URL destino
-        max_reintentos: Número máximo de reintentos
-        
-    Returns:
-        True si la navegación fue exitosa, False en caso contrario
-    """
-    for intento in range(max_reintentos):
-        try:
-            logger.info(f"Intento {intento + 1}/{max_reintentos}: Navegando a {url}...")
-            await page.goto(url, timeout=30000)  # 30 segundos timeout
-            logger.info("Página cargada exitosamente")
-            return True
-        except Exception as e:
-            tiempo_espera = BACKOFF_INICIAL * (2 ** intento)  # Backoff exponencial: 2, 4, 8 segundos...
-            logger.warning(f"Intento {intento + 1} fallido: {e}")
-            
-            if intento < max_reintentos - 1:
-                logger.info(f"Esperando {tiempo_espera} segundos antes de reintentar...")
-                await asyncio.sleep(tiempo_espera)
-            else:
-                logger.error(f"Todos los reintentos agotados. No se pudo cargar: {url}")
-                return False
-    
-    return False
-
-
-async def tomar_captura_con_reintentos(page, nombre_archivo: str, max_reintentos: int = 3) -> bool:
-    """
-    Toma una captura de pantalla con reintentos y backoff exponencial.
-    
-    Args:
-        page: Página de Playwright
-        nombre_archivo: Ruta donde guardar la captura
-        max_reintentos: Número máximo de reintentos
-        
-    Returns:
-        True si la captura fue exitosa, False en caso contrario
-    """
-    for intento in range(max_reintentos):
-        try:
-            await page.screenshot(path=nombre_archivo, full_page=False)
-            return True
-        except Exception as e:
-            tiempo_espera = 1 * (2 ** intento)  # Backoff: 1, 2, 4 segundos
-            logger.warning(f"Error en captura (intento {intento + 1}): {e}")
-            
-            if intento < max_reintentos - 1:
-                await asyncio.sleep(tiempo_espera)
-            else:
-                logger.error(f"No se pudo tomar captura después de {max_reintentos} intentos")
-                return False
-    
-    return False
-
-
-async def ejecutar_monitor_capturas():
-    """Función principal que ejecuta el monitor de capturas de pantalla."""
-    
-    # 0. Validar URL antes de iniciar
-    if not validar_url(URL_OBJETIVO):
-        logger.error("La URL no es válida o no es accesible. Abortando.")
-        return
-    
-    # 1. Crear directorio si no existe
-    if not os.path.exists(NOMBRE_CARPETA):
-        os.makedirs(NOMBRE_CARPETA)
-        logger.info(f"Carpeta creada: {NOMBRE_CARPETA}")
-    else:
-        logger.debug(f"La carpeta ya existe: {NOMBRE_CARPETA}")
-
-    # Calcular tiempo límite
-    tiempo_inicio = time.time()
-    tiempo_limite = tiempo_inicio + (DURACION_MAXIMA_MINUTOS * 60)
-    hora_fin_estimada = datetime.now() + timedelta(minutes=DURACION_MAXIMA_MINUTOS)
-    logger.info(f"Duración máxima configurada: {DURACION_MAXIMA_MINUTOS} minutos")
-    logger.info(f"El script se detendrá automáticamente a las: {hora_fin_estimada.strftime('%H:%M:%S')}")
-
+async def run_stealth():
     async with async_playwright() as p:
-        logger.info("Iniciando navegador Chromium...")
-        browser = await p.chromium.launch(headless=True)  # Cambiar a False si deseas ver el navegador
-        page = await browser.new_page()
-        logger.info("Navegador iniciado correctamente")
-
-        # Navegar con reintentos
-        if not await navegar_con_reintentos(page, URL_OBJETIVO):
-            await browser.close()
-            return
-
-        # Opcional: Esperar a que un elemento específico cargue primero
-        # await page.wait_for_selector("body")
-
-        logger.info("Iniciando bucle de capturas. Presiona Ctrl+C para detener.")
-
-        contador_capturas = 0
-        capturas_fallidas = 0
-        motivo_fin = "desconocido"
+        # Launch with special "Stealth" arguments
+        browser = await p.chromium.launch(
+            headless=False,  # Headless mode is often blocked; try False first
+            channel="chrome", # Use your real Chrome browser (looks more human)
+            args=[
+                "--disable-blink-features=AutomationControlled", # <--- THE KEY COMMAND
+                "--no-sandbox",
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" # Fake a standard user agent
+            ]
+        )
         
-        try:
-            while True:
-                # Verificar si se alcanzó el tiempo límite
-                if time.time() >= tiempo_limite:
-                    motivo_fin = "duración máxima alcanzada"
-                    logger.warning(f"Tiempo límite alcanzado ({DURACION_MAXIMA_MINUTOS} minutos). Deteniendo...")
-                    break
-                
-                # Calcular tiempo restante
-                tiempo_restante = int((tiempo_limite - time.time()) / 60)
-                
-                # Generar nombre de archivo único basado en la hora
-                marca_tiempo = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                nombre_archivo = f"{NOMBRE_CARPETA}/captura_{marca_tiempo}.png"
+        # Create a context with extra stealth settings
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1920, "height": 1080}
+        )
+        
+        # Apply a script to delete the 'webdriver' property from the browser
+        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-                # Tomar la captura de pantalla con reintentos
-                if await tomar_captura_con_reintentos(page, nombre_archivo):
-                    contador_capturas += 1
-                    logger.info(f"Captura guardada: {nombre_archivo} (Total: {contador_capturas}, Restante: ~{tiempo_restante}min)")
-                else:
-                    capturas_fallidas += 1
-                    logger.warning(f"Capturas fallidas acumuladas: {capturas_fallidas}")
-
-                # Esperar antes de la siguiente captura
-                await asyncio.sleep(INTERVALO)
-
-        except KeyboardInterrupt:
-            motivo_fin = "detenido por el usuario"
-            logger.warning("Detenido por el usuario.")
-        except Exception as e:
-            motivo_fin = f"error inesperado: {e}"
-            logger.error(f"Error inesperado en el bucle: {e}")
-        finally:
-            duracion_total = int((time.time() - tiempo_inicio) / 60)
-            logger.info(f"=== RESUMEN DE EJECUCIÓN ===")
-            logger.info(f"Motivo de finalización: {motivo_fin}")
-            logger.info(f"Duración total: {duracion_total} minutos")
-            logger.info(f"Capturas exitosas: {contador_capturas}")
-            logger.info(f"Capturas fallidas: {capturas_fallidas}")
-            logger.info(f"Cerrando navegador...")
-            await browser.close()
-            logger.info("Navegador cerrado correctamente")
+        page = await context.new_page()
+        
+        print("Attempting stealth navigation...")
+        await page.goto(TARGET_URL)
+        
+        # Take a screenshot to verify success
+        await page.screenshot(path="stealth_check.png")
+        print("Screenshot saved.")
+        
+        await asyncio.sleep(10) # Keep open to check manually
+        await browser.close()
 
 if __name__ == "__main__":
-    logger.info("=== Iniciando Monitor de Capturas de Pantalla ===")
-    try:
-        asyncio.run(ejecutar_monitor_capturas())
-    except KeyboardInterrupt:
-        pass
-    finally:
-        logger.info("=== Monitor de Capturas Finalizado ===")
+    asyncio.run(run_stealth())
