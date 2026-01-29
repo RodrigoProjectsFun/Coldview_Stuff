@@ -1,0 +1,178 @@
+import os
+import logging
+import time
+from datetime import datetime, timedelta
+from urllib.parse import urlparse
+from DrissionPage import ChromiumPage, ChromiumOptions
+
+# --- CONFIGURACIÓN ---
+URL_OBJETIVO = "https://www.google.com"  # Cambiar a tu sitio objetivo
+INTERVALO = 5                      # Segundos entre capturas de pantalla
+NOMBRE_CARPETA = "screenshots"
+DURACION_MAXIMA_MINUTOS = 120      # Duración máxima de ejecución (2 horas)
+MAX_REINTENTOS = 3                 # Número máximo de reintentos
+BACKOFF_INICIAL = 2                # Segundos iniciales para backoff exponencial
+# ---------------------
+
+# --- CONFIGURACIÓN DE LOGGING ---
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('grafana_screens.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+# ---------------------------------
+
+def validar_url(url: str) -> bool:
+    """Valida que la URL tenga un formato correcto."""
+    try:
+        resultado = urlparse(url)
+        if not all([resultado.scheme, resultado.netloc]):
+            logger.error(f"URL con formato inválido: {url}")
+            return False
+        if resultado.scheme not in ['http', 'https']:
+            logger.error(f"Esquema de URL no soportado: {resultado.scheme}")
+            return False
+        return True
+    except Exception as e:
+        logger.error(f"Error al parsear URL: {e}")
+        return False
+
+def navegar_con_reintentos(page: ChromiumPage, url: str, max_reintentos: int = MAX_REINTENTOS) -> bool:
+    """Navega a una URL con reintentos."""
+    for intento in range(max_reintentos):
+        try:
+            logger.info(f"Intento {intento + 1}/{max_reintentos}: Navegando a {url}...")
+            
+            page.get(url, retry=0, timeout=30) 
+            
+            if page.ele('tag:body'):
+                logger.info("Página cargada exitosamente")
+                return True
+            else:
+                raise Exception("El cuerpo de la página no se detectó.")
+
+        except Exception as e:
+            tiempo_espera = BACKOFF_INICIAL * (2 ** intento)
+            logger.warning(f"Intento {intento + 1} fallido: {e}")
+            
+            if intento < max_reintentos - 1:
+                logger.info(f"Esperando {tiempo_espera} segundos antes de reintentar...")
+                time.sleep(tiempo_espera) 
+            else:
+                logger.error(f"Todos los reintentos agotados. No se pudo cargar: {url}")
+                return False
+    return False
+
+def tomar_captura_con_reintentos(page: ChromiumPage, nombre_archivo: str, max_reintentos: int = 3) -> bool:
+    """Toma una captura de pantalla COMPLETA con reintentos."""
+    for intento in range(max_reintentos):
+        try:
+            # CAMBIO CLAVE: full_page=True hace scroll y captura todo
+            page.get_screenshot(path=nombre_archivo, full_page=True)
+            
+            if os.path.exists(nombre_archivo):
+                return True
+            else:
+                raise Exception("El archivo de captura no se generó.")
+                
+        except Exception as e:
+            tiempo_espera = 1 * (2 ** intento)
+            logger.warning(f"Error en captura (intento {intento + 1}): {e}")
+            
+            if intento < max_reintentos - 1:
+                time.sleep(tiempo_espera)
+            else:
+                logger.error(f"No se pudo tomar captura después de {max_reintentos} intentos")
+                return False
+    return False
+
+def ejecutar_monitor_capturas():
+    """Función principal."""
+    
+    if not validar_url(URL_OBJETIVO):
+        logger.error("La URL tiene un formato inválido. Abortando.")
+        return
+    
+    if not os.path.exists(NOMBRE_CARPETA):
+        os.makedirs(NOMBRE_CARPETA)
+        logger.info(f"Carpeta creada: {NOMBRE_CARPETA}")
+    
+    tiempo_inicio = time.time()
+    tiempo_limite = tiempo_inicio + (DURACION_MAXIMA_MINUTOS * 60)
+    hora_fin_estimada = datetime.now() + timedelta(minutes=DURACION_MAXIMA_MINUTOS)
+    
+    logger.info(f"Duración máxima: {DURACION_MAXIMA_MINUTOS} minutos")
+    logger.info(f"Hora de fin estimada: {hora_fin_estimada.strftime('%H:%M:%S')}")
+
+    co = ChromiumOptions()
+    # co.headless(True) # Descomentar si quieres ejecutarlo en fondo
+    
+    logger.info("Iniciando navegador Chromium (DrissionPage)...")
+    try:
+        page = ChromiumPage(co)
+        logger.info("Navegador iniciado correctamente")
+
+        if not navegar_con_reintentos(page, URL_OBJETIVO):
+            page.quit()
+            return
+
+        logger.info("Iniciando bucle de capturas. Presiona Ctrl+C para detener.")
+
+        contador_capturas = 0
+        capturas_fallidas = 0
+        motivo_fin = "desconocido"
+        
+        while True:
+            if time.time() >= tiempo_limite:
+                motivo_fin = "duración máxima alcanzada"
+                logger.warning(f"Tiempo límite alcanzado. Deteniendo...")
+                break
+            
+            tiempo_restante = int((tiempo_limite - time.time()) / 60)
+            
+            marca_tiempo = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            nombre_archivo = os.path.join(NOMBRE_CARPETA, f"captura_{marca_tiempo}.png")
+
+            if tomar_captura_con_reintentos(page, nombre_archivo):
+                contador_capturas += 1
+                logger.info(f"Captura COMPLETA guardada: {nombre_archivo} (Total: {contador_capturas})")
+            else:
+                capturas_fallidas += 1
+                logger.warning(f"Capturas fallidas acumuladas: {capturas_fallidas}")
+
+            time.sleep(INTERVALO)
+
+    except KeyboardInterrupt:
+        motivo_fin = "detenido por el usuario"
+        logger.warning("Detenido por el usuario.")
+    except Exception as e:
+        motivo_fin = f"error inesperado: {e}"
+        logger.error(f"Error inesperado: {e}")
+    finally:
+        if 'tiempo_inicio' in locals():
+            duracion_total = int((time.time() - tiempo_inicio) / 60)
+        else:
+            duracion_total = 0
+            
+        logger.info(f"=== RESUMEN DE EJECUCIÓN ===")
+        logger.info(f"Motivo: {motivo_fin}")
+        logger.info(f"Duración: {duracion_total} minutos")
+        if 'contador_capturas' in locals():
+            logger.info(f"Capturas: {contador_capturas}")
+        
+        try:
+            if 'page' in locals():
+                page.quit()
+        except:
+            pass
+        logger.info("Navegador cerrado.")
+
+if __name__ == "__main__":
+    try:
+        ejecutar_monitor_capturas()
+    except KeyboardInterrupt:
+        pass
