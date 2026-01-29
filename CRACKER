@@ -1,0 +1,18 @@
+from DrissionPage import ChromiumPage
+
+# Connects to the browser on port 9222 automatically
+page = ChromiumPage()
+
+print("Connected!")
+print(f"Current URL: {page.url}")
+
+# Find the POS/ATM elements (It uses very simple syntax)
+# This finds a div containing 'POS'
+pos_element = page.ele('text:POS') 
+if pos_element:
+    print("Found POS section!")
+    # Get the parent or wrapper if needed
+    parent = pos_element.parent()
+    parent.get_screenshot(path='pos_graph.png')
+
+print("Done.")
