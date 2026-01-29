@@ -6,7 +6,7 @@ Scheduled file checker that copies files from a watch directory to a destination
 
 1. **Run setup:**
    ```
-   setup.bat
+   "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugging-port=9222 --user-data-dir="C:\chrome_debug_profile"
    ```
 
 2. **Edit config:**
