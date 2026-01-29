@@ -5,21 +5,29 @@ from playwright.async_api import async_playwright
 TARGET_URL = "https://your-blocked-site.com" 
 # ---------------------
 
-async def run_xray_with_login():
+async def run_xray_clean():
     async with async_playwright() as p:
         print("1. Launching Browser...")
-        # Launch visible browser (headless=False) so you can login
+        
+        # Launch visible browser
         browser = await p.chromium.launch(
             headless=False,
             channel="chrome",
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
         )
         
-        # Setup stealth context
+        # Create Context
         context = await browser.new_context(viewport={"width": 1920, "height": 3000})
         await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         page = await context.new_page()
+
+        # --- THE FIX: BLOCK INTERCOM & ANALYTICS ---
+        # This prevents the "missing user hash" error by killing the chat widget entirely.
+        print("   -> Blocking Intercom/Chat scripts to prevent errors...")
+        await page.route("**/*intercom*", lambda route: route.abort())
+        await page.route("**/*widget*", lambda route: route.abort())
+        # -------------------------------------------
 
         print(f"2. Navigating to {TARGET_URL}...")
         try:
@@ -41,31 +49,26 @@ async def run_xray_with_login():
 
         # INJECT JAVASCRIPT TO DRAW BOXES
         await page.evaluate("""() => {
-            // Find all potential containers
             const elements = document.querySelectorAll('div, section, article, table, tr');
             
             elements.forEach(el => {
                 const rect = el.getBoundingClientRect();
-                // Filter out tiny invisible elements
                 if (rect.width > 50 && rect.height > 50) {
                     
-                    let color = 'red'; // Default color
+                    let color = 'red'; 
                     let text = el.innerText.toUpperCase();
                     
-                    // HIGHLIGHT 'POS' or 'ATM' SPECIFICALLY
+                    // Highlight POS and ATM containers specifically
                     if (text.includes('POS') || text.includes('ATM')) {
-                        color = '#00ff00'; // Bright Green for your targets
+                        color = '#00ff00'; # Neon Green
                         el.style.boxShadow = '0px 0px 10px #00ff00';
                     }
 
-                    // Draw Border
                     el.style.border = `2px solid ${color}`;
                     el.style.position = 'relative';
 
-                    // Create Label
                     const label = document.createElement('span');
                     
-                    // Build Selector Name (e.g., div#dashboard-wrapper)
                     let name = el.tagName.toLowerCase();
                     if (el.id) name += '#' + el.id;
                     if (el.className && typeof el.className === 'string' && el.className.length > 0) {
@@ -74,7 +77,6 @@ async def run_xray_with_login():
 
                     label.innerText = name;
                     
-                    // Style the Label
                     label.style.position = 'absolute';
                     label.style.top = '0';
                     label.style.left = '0';
@@ -85,7 +87,6 @@ async def run_xray_with_login():
                     label.style.zIndex = '10000';
                     label.style.padding = '2px';
                     
-                    // Only append label if it doesn't already have one
                     if (!el.getAttribute('data-xray')) {
                         el.setAttribute('data-xray', 'true');
                         el.appendChild(label);
@@ -94,15 +95,13 @@ async def run_xray_with_login():
             });
         }""")
 
-        # Take the Blueprint Screenshot
         filename = "layout_blueprint.png"
         await page.screenshot(path=filename, full_page=True)
         
         print(f"SUCCESS! Map saved to: {filename}")
-        print("Open the image. Look for the GREEN or RED boxes around your data.")
-        print("The yellow/green tag in the corner is the SELECTOR you need.")
+        print("Open the image and look for the GREEN boxes.")
 
         await browser.close()
 
 if __name__ == "__main__":
-    asyncio.run(run_xray_with_login())
+    asyncio.run(run_xray_clean())
