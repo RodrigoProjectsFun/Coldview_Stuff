@@ -1,41 +1,111 @@
 import asyncio
 from playwright.async_api import async_playwright
 
-TARGET_URL = "https://your-blocked-site.com"
+# --- CONFIGURATION ---
+TARGET_URL = "https://your-blocked-site.com"  # <--- REPLACE THIS
+# ---------------------
 
-async def run_stealth():
+async def generate_xray_map():
     async with async_playwright() as p:
-        # Launch with special "Stealth" arguments
+        print("Launching Stealth Browser for X-Ray...")
+        
+        # 1. Use the working Stealth Launch configuration
         browser = await p.chromium.launch(
-            headless=False,  # Headless mode is often blocked; try False first
-            channel="chrome", # Use your real Chrome browser (looks more human)
+            headless=False,
+            channel="chrome",
             args=[
-                "--disable-blink-features=AutomationControlled", # <--- THE KEY COMMAND
+                "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
-                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" # Fake a standard user agent
+                "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             ]
         )
         
-        # Create a context with extra stealth settings
+        # 2. Stealth Context
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080}
+            viewport={"width": 1920, "height": 3000} # Tall viewport to capture more content
         )
-        
-        # Apply a script to delete the 'webdriver' property from the browser
+        # Remove robot flag
         await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         page = await context.new_page()
-        
-        print("Attempting stealth navigation...")
-        await page.goto(TARGET_URL)
-        
-        # Take a screenshot to verify success
-        await page.screenshot(path="stealth_check.png")
-        print("Screenshot saved.")
-        
-        await asyncio.sleep(10) # Keep open to check manually
-        await browser.close()
+
+        print(f"Navigating to {TARGET_URL}...")
+        try:
+            await page.goto(TARGET_URL, timeout=60000, wait_until="networkidle")
+            
+            # --- LOGIN STEPS (UNCOMMENT IF NEEDED) ---
+            # If the dashboard is behind a login, add your steps here:
+            # await page.fill("input#username", "your_user")
+            # await page.fill("input#password", "your_pass")
+            # await page.click("button#login-btn")
+            # await page.wait_for_load_state("networkidle")
+            # -----------------------------------------
+
+            print("Injecting X-Ray vision (drawing boxes)...")
+            
+            # 3. Inject JavaScript to Draw Borders and Labels
+            await page.evaluate("""() => {
+                // Target common containers: divs, sections, articles, mains
+                const elements = document.querySelectorAll('div, section, article, main, aside, table');
+                
+                elements.forEach(el => {
+                    const rect = el.getBoundingClientRect();
+                    // Only outline visible elements larger than 100x100 pixels
+                    if (rect.width > 100 && rect.height > 100) {
+                        
+                        // DRAW RED BORDER
+                        el.style.border = '3px solid red';
+                        el.style.position = 'relative'; 
+                        
+                        // CREATE YELLOW LABEL
+                        const label = document.createElement('span');
+                        
+                        // Build the selector string (e.g. "div#dashboard-wrapper.container")
+                        let name = el.tagName.toLowerCase();
+                        if (el.id) name += '#' + el.id;
+                        if (el.className && typeof el.className === 'string' && el.className.length > 0) {
+                             name += '.' + el.className.split(' ')[0]; // Add first class only
+                        }
+                        
+                        label.innerText = name;
+                        
+                        // Style the label for visibility
+                        label.style.position = 'absolute';
+                        label.style.top = '0';
+                        label.style.left = '0';
+                        label.style.backgroundColor = 'yellow';
+                        label.style.color = 'black';
+                        label.style.fontSize = '14px';
+                        label.style.fontWeight = 'bold';
+                        label.style.zIndex = '10000';
+                        label.style.padding = '4px';
+                        label.style.border = '1px solid black';
+                        label.style.pointerEvents = 'none'; // Click through it
+                        
+                        el.appendChild(label);
+                    }
+                });
+            }""")
+
+            # 4. Save the Blueprint Image
+            filename = "xray_blueprint.png"
+            # full_page=True captures the entire scrollable area
+            await page.screenshot(path=filename, full_page=True)
+            
+            print(f"Blueprint saved to: {filename}")
+            print("------------------------------------------------")
+            print("INSTRUCTIONS:")
+            print("1. Open 'xray_blueprint.png'.")
+            print("2. Find the red box that surrounds BOTH your POS and ATM graphs.")
+            print("3. Read the yellow label in the top-left of that box.")
+            print("4. That label is your TARGET_SELECTOR for the monitor script.")
+            print("------------------------------------------------")
+
+        except Exception as e:
+            print(f"Error during X-Ray: {e}")
+        finally:
+            await browser.close()
 
 if __name__ == "__main__":
-    asyncio.run(run_stealth())
+    asyncio.run(generate_xray_map())
