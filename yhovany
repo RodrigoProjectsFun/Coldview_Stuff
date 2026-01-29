@@ -1,31 +1,22 @@
 import asyncio
-import os
-from datetime import datetime
 from playwright.async_api import async_playwright
 
 # --- CONFIGURATION ---
-TARGET_URL = "https://your-blocked-site.com"
-TARGET_SELECTOR = "#dashboard-wrapper"  # <--- From your X-Ray results
-FOLDER_NAME = "screenshots"
-CHECK_INTERVAL = 60
+TARGET_URL = "https://your-blocked-site.com" 
 # ---------------------
 
-async def run_manual_login_monitor():
-    if not os.path.exists(FOLDER_NAME):
-        os.makedirs(FOLDER_NAME)
-
+async def run_xray_with_login():
     async with async_playwright() as p:
         print("1. Launching Browser...")
-        
-        # Launch non-headless so you can see and interact
+        # Launch visible browser (headless=False) so you can login
         browser = await p.chromium.launch(
-            headless=False, 
+            headless=False,
             channel="chrome",
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
         )
         
-        # Setup context
-        context = await browser.new_context(viewport={"width": 1920, "height": 1080})
+        # Setup stealth context
+        context = await browser.new_context(viewport={"width": 1920, "height": 3000})
         await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         page = await context.new_page()
@@ -37,52 +28,81 @@ async def run_manual_login_monitor():
             print("Page loaded (or timed out), continuing...")
 
         # ============================================================
-        # THE PAUSE BUTTON
+        # THE LOGIN PAUSE
         # ============================================================
         print("\n" + "="*50)
-        print("ACTION REQUIRED: Log in manually in the browser window.")
-        print("Navigate to the dashboard where the graphs are visible.")
+        print("ACTION REQUIRED: Log in manually in the opened window.")
+        print("Navigate to the dashboard where you see 'POS' and 'ATM'.")
         input(">>> WHEN YOU ARE READY, CLICK HERE AND PRESS ENTER <<<")
         print("="*50 + "\n")
         # ============================================================
 
-        print("3. Resuming automation... Searching for target element.")
+        print("3. Analyzing page structure (X-Ray Vision)...")
 
-        try:
-            # Wait for your graph to ensure we are actually on the right page
-            await page.wait_for_selector(TARGET_SELECTOR, state="visible", timeout=10000)
-            print(f"Target '{TARGET_SELECTOR}' found! Starting screenshot loop.")
+        # INJECT JAVASCRIPT TO DRAW BOXES
+        await page.evaluate("""() => {
+            // Find all potential containers
+            const elements = document.querySelectorAll('div, section, article, table, tr');
             
-            while True:
-                timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                filename = f"{FOLDER_NAME}/graph_{timestamp}.png"
-                
-                # Screenshot specific element
-                await page.locator(TARGET_SELECTOR).screenshot(path=filename)
-                print(f"[{timestamp}] Saved: {filename}")
-                
-                await asyncio.sleep(CHECK_INTERVAL)
-                
-                # Optional: Reload page to update data
-                # Comment this out if the site updates automatically via WebSocket
-                try:
-                    await page.reload(wait_until="domcontentloaded")
-                    await page.wait_for_selector(TARGET_SELECTOR, timeout=10000)
-                except:
-                    print("Reload took too long, skipping...")
+            elements.forEach(el => {
+                const rect = el.getBoundingClientRect();
+                // Filter out tiny invisible elements
+                if (rect.width > 50 && rect.height > 50) {
+                    
+                    let color = 'red'; // Default color
+                    let text = el.innerText.toUpperCase();
+                    
+                    // HIGHLIGHT 'POS' or 'ATM' SPECIFICALLY
+                    if (text.includes('POS') || text.includes('ATM')) {
+                        color = '#00ff00'; // Bright Green for your targets
+                        el.style.boxShadow = '0px 0px 10px #00ff00';
+                    }
 
-        except Exception as e:
-            print(f"Error: Could not find '{TARGET_SELECTOR}' after you pressed Enter.")
-            print(f"Details: {e}")
-            # Take a debug picture to see what the script sees
-            await page.screenshot(path="debug_error.png", full_page=True)
+                    // Draw Border
+                    el.style.border = `2px solid ${color}`;
+                    el.style.position = 'relative';
 
-        finally:
-            await browser.close()
+                    // Create Label
+                    const label = document.createElement('span');
+                    
+                    // Build Selector Name (e.g., div#dashboard-wrapper)
+                    let name = el.tagName.toLowerCase();
+                    if (el.id) name += '#' + el.id;
+                    if (el.className && typeof el.className === 'string' && el.className.length > 0) {
+                         name += '.' + el.className.split(' ')[0];
+                    }
+
+                    label.innerText = name;
+                    
+                    // Style the Label
+                    label.style.position = 'absolute';
+                    label.style.top = '0';
+                    label.style.left = '0';
+                    label.style.background = color;
+                    label.style.color = 'black';
+                    label.style.fontSize = '12px';
+                    label.style.fontWeight = 'bold';
+                    label.style.zIndex = '10000';
+                    label.style.padding = '2px';
+                    
+                    // Only append label if it doesn't already have one
+                    if (!el.getAttribute('data-xray')) {
+                        el.setAttribute('data-xray', 'true');
+                        el.appendChild(label);
+                    }
+                }
+            });
+        }""")
+
+        # Take the Blueprint Screenshot
+        filename = "layout_blueprint.png"
+        await page.screenshot(path=filename, full_page=True)
+        
+        print(f"SUCCESS! Map saved to: {filename}")
+        print("Open the image. Look for the GREEN or RED boxes around your data.")
+        print("The yellow/green tag in the corner is the SELECTOR you need.")
+
+        await browser.close()
 
 if __name__ == "__main__":
-    try:
-        # Create a new event loop just for this run
-        asyncio.run(run_manual_login_monitor())
-    except KeyboardInterrupt:
-        print("\nStopped.")
+    asyncio.run(run_xray_with_login())
