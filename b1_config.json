@@ -1,0 +1,358 @@
+{
+    "B1": {
+        "lines_per_record": 2,
+        "line_configs": [
+            [
+                {
+                    "name": "OPERAC",
+                    "start": 0,
+                    "end": 6,
+                    "type": "string"
+                },
+                {
+                    "name": "RS",
+                    "start": 8,
+                    "end": 10,
+                    "type": "numeric"
+                },
+                {
+                    "name": "MOVIM",
+                    "start": 12,
+                    "end": 17,
+                    "type": "string"
+                },
+                {
+                    "name": "MONEDA ORIGINAL",
+                    "start": 19,
+                    "end": 22,
+                    "type": "string"
+                },
+                {
+                    "name": "IMPORTE ORIGINAL",
+                    "start": 22,
+                    "end": 37,
+                    "type": "amount"
+                },
+                {
+                    "name": "MONEDA VISA",
+                    "start": 37,
+                    "end": 40,
+                    "type": "string"
+                },
+                {
+                    "name": "IMPORT VISA",
+                    "start": 40,
+                    "end": 55,
+                    "type": "amount"
+                },
+                {
+                    "name": "MONEDA AFECTADO",
+                    "start": 55,
+                    "end": 58,
+                    "type": "string"
+                },
+                {
+                    "name": "IMPORTE AFECTADO",
+                    "start": 58,
+                    "end": 73,
+                    "type": "amount"
+                },
+                {
+                    "name": "TIPO CUENTA",
+                    "start": 73,
+                    "end": 77,
+                    "type": "string"
+                },
+                {
+                    "name": "CUENTA AFECTADA",
+                    "start": 77,
+                    "end": 97,
+                    "type": "string"
+                },
+                {
+                    "name": "FECOPE",
+                    "start": 97,
+                    "end": 106,
+                    "type": "string"
+                },
+                {
+                    "name": "HORA",
+                    "start": 106,
+                    "end": 113,
+                    "type": "string"
+                },
+                {
+                    "name": "FBASE1",
+                    "start": 113,
+                    "end": 122,
+                    "type": "string"
+                },
+                {
+                    "name": "EXPIRACION",
+                    "start": 122,
+                    "end": 128,
+                    "type": "string"
+                }
+            ],
+            [
+                {
+                    "name": "TERMINAL",
+                    "start": 0,
+                    "end": 12,
+                    "type": "string"
+                },
+                {
+                    "name": "TIPO",
+                    "start": 12,
+                    "end": 17,
+                    "type": "string"
+                },
+                {
+                    "name": "IDENTIFICACION",
+                    "start": 17,
+                    "end": 32,
+                    "type": "string"
+                },
+                {
+                    "name": "ESTABLECIMIENTO",
+                    "start": 32,
+                    "end": 58,
+                    "type": "string"
+                },
+                {
+                    "name": "CIUDAD",
+                    "start": 58,
+                    "end": 72,
+                    "type": "string"
+                },
+                {
+                    "name": "PAIS",
+                    "start": 72,
+                    "end": 78,
+                    "type": "string"
+                },
+                {
+                    "name": "BIN ADQUIR.",
+                    "start": 78,
+                    "end": 91,
+                    "type": "string"
+                },
+                {
+                    "name": "PIN",
+                    "start": 91,
+                    "end": 96,
+                    "type": "string"
+                },
+                {
+                    "name": "VIS.REFER",
+                    "start": 96,
+                    "end": 108,
+                    "type": "string"
+                },
+                {
+                    "name": "TRNX",
+                    "start": 108,
+                    "end": 113,
+                    "type": "string"
+                },
+                {
+                    "name": "CAVV",
+                    "start": 113,
+                    "end": 119,
+                    "type": "string"
+                },
+                {
+                    "name": "POS.C.CODE",
+                    "start": 119,
+                    "end": 140,
+                    "type": "string"
+                }
+            ]
+        ]
+    },
+    "B2": {
+        "lines_per_record": 3,
+        "line_configs": [
+            [
+                {
+                    "name": "OPERAC",
+                    "start": 0,
+                    "end": 6,
+                    "type": "string"
+                },
+                {
+                    "name": "RS",
+                    "start": 8,
+                    "end": 10,
+                    "type": "numeric"
+                },
+                {
+                    "name": "MOVIM",
+                    "start": 12,
+                    "end": 17,
+                    "type": "string"
+                },
+                {
+                    "name": "MONEDA ORIGINAL",
+                    "start": 19,
+                    "end": 22,
+                    "type": "string"
+                },
+                {
+                    "name": "IMPORTE ORIGINAL",
+                    "start": 22,
+                    "end": 37,
+                    "type": "amount"
+                },
+                {
+                    "name": "MONEDA VISA",
+                    "start": 37,
+                    "end": 40,
+                    "type": "string"
+                },
+                {
+                    "name": "IMPORT VISA",
+                    "start": 40,
+                    "end": 55,
+                    "type": "amount"
+                },
+                {
+                    "name": "MONEDA AFECTADO",
+                    "start": 55,
+                    "end": 58,
+                    "type": "string"
+                },
+                {
+                    "name": "IMPORTE AFECTADO",
+                    "start": 58,
+                    "end": 73,
+                    "type": "amount"
+                },
+                {
+                    "name": "TIPO CUENTA",
+                    "start": 73,
+                    "end": 77,
+                    "type": "string"
+                },
+                {
+                    "name": "CUENTA AFECTADA",
+                    "start": 77,
+                    "end": 97,
+                    "type": "string"
+                },
+                {
+                    "name": "FECOPE",
+                    "start": 97,
+                    "end": 106,
+                    "type": "string"
+                },
+                {
+                    "name": "HORA",
+                    "start": 106,
+                    "end": 113,
+                    "type": "string"
+                },
+                {
+                    "name": "FBASE1",
+                    "start": 113,
+                    "end": 122,
+                    "type": "string"
+                },
+                {
+                    "name": "EXPIRACION",
+                    "start": 122,
+                    "end": 128,
+                    "type": "string"
+                }
+            ],
+            [
+                {
+                    "name": "TERMINAL",
+                    "start": 0,
+                    "end": 12,
+                    "type": "string"
+                },
+                {
+                    "name": "TIPO",
+                    "start": 12,
+                    "end": 17,
+                    "type": "string"
+                },
+                {
+                    "name": "IDENTIFICACION",
+                    "start": 17,
+                    "end": 32,
+                    "type": "string"
+                },
+                {
+                    "name": "ESTABLECIMIENTO",
+                    "start": 32,
+                    "end": 58,
+                    "type": "string"
+                },
+                {
+                    "name": "CIUDAD",
+                    "start": 58,
+                    "end": 72,
+                    "type": "string"
+                },
+                {
+                    "name": "PAIS",
+                    "start": 72,
+                    "end": 78,
+                    "type": "string"
+                },
+                {
+                    "name": "BIN ADQUIR.",
+                    "start": 78,
+                    "end": 91,
+                    "type": "string"
+                },
+                {
+                    "name": "PIN",
+                    "start": 91,
+                    "end": 96,
+                    "type": "string"
+                },
+                {
+                    "name": "VIS.REFER",
+                    "start": 96,
+                    "end": 108,
+                    "type": "string"
+                },
+                {
+                    "name": "TRNX",
+                    "start": 108,
+                    "end": 113,
+                    "type": "string"
+                },
+                {
+                    "name": "CAVV",
+                    "start": 113,
+                    "end": 119,
+                    "type": "string"
+                },
+                {
+                    "name": "POS.C.CODE",
+                    "start": 119,
+                    "end": 140,
+                    "type": "string"
+                }
+            ],
+            [
+                {
+                    "name": "CAMPO_EXTRA_1",
+                    "start": 0,
+                    "end": 20,
+                    "type": "string"
+                },
+                {
+                    "name": "CAMPO_EXTRA_2",
+                    "start": 20,
+                    "end": 40,
+                    "type": "string"
+                }
+            ]
+        ]
+    }
+}
