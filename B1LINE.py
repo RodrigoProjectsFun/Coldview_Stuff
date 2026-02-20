@@ -322,3 +322,6 @@ if __name__ == "__main__":
     import sys
     input_arg = sys.argv[1] if len(sys.argv) > 1 else None
     run(input_arg)
+    
+    print("\n" + "-"*40)
+    input("Presione ENTER para salir...")
