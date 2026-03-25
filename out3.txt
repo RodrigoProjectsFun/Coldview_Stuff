@@ -1,0 +1,139 @@
+﻿test_full_conciliation_with_matching_data (test_sum_concil.TestIntegration.test_full_conciliation_with_matching_data)
+Integration test: Full workflow with matching debt/credit files ... ok
+test_aggregation_sums_debt_side_correctly (test_sum_concil.TestSumConcil.test_aggregation_sums_debt_side_correctly)
+Test that aggregation sums the DEBT amounts (not credit) to avoid ... ok
+test_all_credits_matched_is_valid (test_sum_concil.TestSumConcil.test_all_credits_matched_is_valid)
+Test that 100% credit match rate is the expected valid state ... ok
+test_allows_different_files_within_pile (test_sum_concil.TestSumConcil.test_allows_different_files_within_pile)
+Test that legitimately different files within same category pass ... ok
+test_allows_legitimate_different_files (test_sum_concil.TestSumConcil.test_allows_legitimate_different_files)
+Test that legitimately different files pass validation ... ok
+test_amount_cleaning_with_currency_symbols (test_sum_concil.TestSumConcil.test_amount_cleaning_with_currency_symbols)
+Test that amounts with currency symbols are parsed correctly ... ok
+test_calculates_match_rate (test_sum_concil.TestSumConcil.test_calculates_match_rate)
+Test match rate calculation ... ok
+test_calculates_orphaned_debts (test_sum_concil.TestSumConcil.test_calculates_orphaned_debts)
+Test identification of debts without matching credits ... ok
+test_detects_empty_card_numbers (test_sum_concil.TestSumConcil.test_detects_empty_card_numbers)
+Test detection of empty/null Card numbers ... ok
+test_detects_empty_operation_numbers (test_sum_concil.TestSumConcil.test_detects_empty_operation_numbers)
+Test detection of empty/null Operation Numbers ... ok
+test_detects_exact_duplicate_dataframes (test_sum_concil.TestSumConcil.test_detects_exact_duplicate_dataframes)
+Test that identical DataFrames are flagged as duplicates ... ok
+test_detects_high_key_overlap (test_sum_concil.TestSumConcil.test_detects_high_key_overlap)
+Test detection of suspiciously high key overlap with same row count ... ok
+test_detects_high_overlap_within_pile (test_sum_concil.TestSumConcil.test_detects_high_overlap_within_pile)
+Test detection of >90% overlap between files in same category ... ok
+test_detects_identical_amount_fingerprint (test_sum_concil.TestSumConcil.test_detects_identical_amount_fingerprint)
+Test detection of identical sum/mean/count fingerprint ... ok
+test_detects_identical_files_within_debt_pile (test_sum_concil.TestSumConcil.test_detects_identical_files_within_debt_pile)
+Test detection of two identical files within the DEBT category ... ok
+test_detects_internal_duplicates (test_sum_concil.TestSumConcil.test_detects_internal_duplicates)
+Test detection of duplicate key combinations within same source file ... ok
+test_detects_negative_amounts (test_sum_concil.TestSumConcil.test_detects_negative_amounts)
+Test detection of negative amounts ... ok
+test_detects_same_file_type_in_both (test_sum_concil.TestSumConcil.test_detects_same_file_type_in_both)
+Test warning when both files are the same type (e.g., both M2D-RECU) ... ok
+test_detects_same_keys_different_amounts_within_pile (test_sum_concil.TestSumConcil.test_detects_same_keys_different_amounts_within_pile)
+Test detection of files with same operations but different amounts ... ok
+test_detects_statistical_outliers (test_sum_concil.TestSumConcil.test_detects_statistical_outliers)
+Test detection of unusually large amounts (>3 std from mean) ... ok
+test_detects_whitespace_only_values (test_sum_concil.TestSumConcil.test_detects_whitespace_only_values)
+Test detection of whitespace-only Card numbers ... ok
+test_detects_zero_amounts (test_sum_concil.TestSumConcil.test_detects_zero_amounts)
+Test detection of zero-amount transactions ... ok
+test_empty_dataframe_handling (test_sum_concil.TestSumConcil.test_empty_dataframe_handling)
+Test that empty DataFrames are handled gracefully ... ok
+test_excel_writer_creates_all_sheets (test_sum_concil.TestSumConcil.test_excel_writer_creates_all_sheets)
+Test that output Excel has all expected sheets ... ok
+test_filename_no_date_extraction (test_sum_concil.TestSumConcil.test_filename_no_date_extraction)
+Test behavior when filename has no valid date ... ok
+test_filename_standardization_m2d_recu (test_sum_concil.TestSumConcil.test_filename_standardization_m2d_recu)
+Test that M2D-RECU files are standardized correctly ... ok
+test_filename_standardization_m6d_dev (test_sum_concil.TestSumConcil.test_filename_standardization_m6d_dev)
+Test that M6D-DEV files are standardized correctly ... ok
+test_filename_standardization_m6d_dev_vff (test_sum_concil.TestSumConcil.test_filename_standardization_m6d_dev_vff)
+Test that M6D-DEV_VFF files are standardized as ACREEDORA ... ok
+test_glob_filter_excludes_wrong_files (test_sum_concil.TestSumConcil.test_glob_filter_excludes_wrong_files)
+Test that the secondary filter correctly excludes non-matching files ... ok
+test_inner_join_with_duplicates_creates_cartesian_product (test_sum_concil.TestSumConcil.test_inner_join_with_duplicates_creates_cartesian_product)
+Critical Test: When 2 debts match 1 credit, we should get 2 rows. ... ok
+test_missing_required_columns_handled (test_sum_concil.TestSumConcil.test_missing_required_columns_handled)
+Simulate file with missing Card or Operation Number columns ... ok
+test_no_matches_returns_empty (test_sum_concil.TestSumConcil.test_no_matches_returns_empty)
+Test that completely non-matching data produces empty result ... ok
+test_orphan_amount_calculation (test_sum_concil.TestSumConcil.test_orphan_amount_calculation)
+Test that orphaned record amounts are calculated correctly ... ok
+test_orphaned_credits_are_critical_error (test_sum_concil.TestSumConcil.test_orphaned_credits_are_critical_error)
+CRITICAL BUSINESS RULE: Credits without matching debts are BLOCKING errors. ... ok
+test_orphaned_debts_are_informational (test_sum_concil.TestSumConcil.test_orphaned_debts_are_informational)
+Test that orphaned debts are allowed (informational only) ... ok
+test_scientific_notation_protection (test_sum_concil.TestSumConcil.test_scientific_notation_protection)
+Test that loading as str dtype protects long IDs from scientific notation. ... ok
+test_skips_comparison_for_different_row_counts (test_sum_concil.TestSumConcil.test_skips_comparison_for_different_row_counts)
+Test that files with different row counts are not flagged as duplicates ... ok
+test_regular_credit_excludes_vff (test_sum_concil.TestVFFCreditLogic.test_regular_credit_excludes_vff)
+Test that VFF files are NOT loaded into the regular credit pile ... Cargando 1 archivos para DEBT...
+Cargando 1 archivos para CREDIT...
+Cargando 1 archivos para CREDIT_VFF...
+  Γ£ô Se calcularon 1 notas de credito VFF (acreedoras)
+ok
+test_vff_cross_file_matching (test_sum_concil.TestVFFCreditLogic.test_vff_cross_file_matching)
+Test that unpaired VFF operations match across other VFF files ... Cargando 1 archivos para DEBT...
+Cargando 0 archivos para CREDIT...
+Cargando 2 archivos para CREDIT_VFF...
+  ΓÜá NOTA DEUDORA VFF: 1234/OP-001 dif=-150.00
+  ΓÜá Se encontraron 1 notas deudoras VFF / errores
+Detenido: Faltan datos.
+FAIL
+test_vff_matching_against_m2d (test_sum_concil.TestVFFCreditLogic.test_vff_matching_against_m2d)
+Test that VFF computed credits match against M2D debts ... Cargando 1 archivos para DEBT...
+Cargando 0 archivos para CREDIT...
+Cargando 1 archivos para CREDIT_VFF...
+  Γ£ô Se calcularon 1 notas de credito VFF (acreedoras)
+Conciliando Transacciones...
+Conciliando creditos VFF contra deudas M2D...
+  Γ£ô Se conciliaron 1 creditos VFF con deudas M2D
+Analizando registros sin conciliar...
+
+≡ƒôè DEUDAS SIN CONCILIAR: 1 (Informativo)
+ok
+test_vff_negative_difference_flagged (test_sum_concil.TestVFFCreditLogic.test_vff_negative_difference_flagged)
+Test that negative VFF differences are captured as debtor notes (error) ...   ΓÜá NOTA DEUDORA VFF: 1234/OP-001 dif=-300.00
+  ΓÜá Se encontraron 1 notas deudoras VFF / errores
+ok
+test_vff_no_match_goes_to_unexpected (test_sum_concil.TestVFFCreditLogic.test_vff_no_match_goes_to_unexpected)
+Test that VFF credits with no M2D match go to unexpected refunds ... Cargando 1 archivos para DEBT...
+Cargando 0 archivos para CREDIT...
+Cargando 1 archivos para CREDIT_VFF...
+  Γ£ô Se calcularon 1 notas de credito VFF (acreedoras)
+Conciliando Transacciones...
+Conciliando creditos VFF contra deudas M2D...
+  ΓÜá 1 creditos VFF sin coincidencia M2D ΓåÆ Devoluciones Inesperadas
+No se encontraron coincidencias.
+ok
+test_vff_pair_computation (test_sum_concil.TestVFFCreditLogic.test_vff_pair_computation)
+Test that VFF paired operations produce correct credit note = creditor - debtor ...   Γ£ô Se calcularon 2 notas de credito VFF (acreedoras)
+ok
+
+======================================================================
+FAIL: test_vff_cross_file_matching (test_sum_concil.TestVFFCreditLogic.test_vff_cross_file_matching)
+Test that unpaired VFF operations match across other VFF files
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\rodri\OneDrive\Documents\ANTIGRAVITY_PROJECTS\crm_automator\test_sum_concil.py", line 985, in test_vff_cross_file_matching
+    self.assertFalse(c.df_credit_vff.empty,
+AssertionError: True is not false : Cross-file VFF match should produce a computed credit note
+
+----------------------------------------------------------------------
+Ran 43 tests in 0.946s
+
+FAILED (failures=1)
+============================================================
+FAILED TEST: test_vff_cross_file_matching (test_sum_concil.TestVFFCreditLogic.test_vff_cross_file_matching)
+------------------------------------------------------------
+Traceback (most recent call last):
+  File "C:\Users\rodri\OneDrive\Documents\ANTIGRAVITY_PROJECTS\crm_automator\test_sum_concil.py", line 985, in test_vff_cross_file_matching
+    self.assertFalse(c.df_credit_vff.empty,
+AssertionError: True is not false : Cross-file VFF match should produce a computed credit note
+

@@ -126,19 +126,22 @@ class Conciliator:
         individual_files = {}
         print(f"Cargando {len(files)} archivos para {label}...")
 
-        # Parallel file loading
+        # Parallel file loading (with ordered array collection)
+        results = [None] * len(files)
         with ThreadPoolExecutor(max_workers=max(1, min(len(files), os.cpu_count() or 4))) as executor:
-            future_to_file = {executor.submit(self._process_single_file, f): f for f in files}
-            for future in as_completed(future_to_file):
-                f = future_to_file[future]
+            future_to_index = {executor.submit(self._process_single_file, f): i for i, f in enumerate(files)}
+            for future in as_completed(future_to_index):
+                i = future_to_index[future]
                 try:
-                    df = future.result()
-                    if df is not None:
-                        std_name = df[ACCOUNTING_REF].iloc[0]
-                        all_dfs.append(df)
-                        individual_files[std_name] = df
+                    results[i] = future.result()
                 except Exception as e:
-                    print(f"  [ERROR] {os.path.basename(f)}: {e}")
+                    print(f"  [ERROR] {os.path.basename(files[i])}: {e}")
+
+        for df in results:
+            if df is not None:
+                std_name = df[ACCOUNTING_REF].iloc[0]
+                all_dfs.append(df)
+                individual_files[std_name] = df
 
         combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
         return combined, individual_files
@@ -161,19 +164,22 @@ class Conciliator:
         individual_files = {}
         print(f"Cargando {len(files)} archivos para CREDIT_VFF...")
         
-        # Parallel file loading
-        with ThreadPoolExecutor(max_workers=min(len(files) or 1, os.cpu_count() or 4)) as executor:
-            future_to_file = {executor.submit(self._process_single_file, f): f for f in files}
-            for future in as_completed(future_to_file):
-                f = future_to_file[future]
+        # Parallel file loading (with ordered array collection)
+        results = [None] * len(files)
+        with ThreadPoolExecutor(max_workers=max(1, min(len(files), os.cpu_count() or 4))) as executor:
+            future_to_index = {executor.submit(self._process_single_file, f): i for i, f in enumerate(files)}
+            for future in as_completed(future_to_index):
+                i = future_to_index[future]
                 try:
-                    df = future.result()
-                    if df is not None:
-                        std_name = df[ACCOUNTING_REF].iloc[0]
-                        all_dfs.append(df)
-                        individual_files[std_name] = df
+                    results[i] = future.result()
                 except Exception as e:
-                    print(f"  [ERROR] {os.path.basename(f)}: {e}")
+                    print(f"  [ERROR] {os.path.basename(files[i])}: {e}")
+                    
+        for df in results:
+            if df is not None:
+                std_name = df[ACCOUNTING_REF].iloc[0]
+                all_dfs.append(df)
+                individual_files[std_name] = df
         
         if not all_dfs:
             print("  No se encontraron archivos VFF.")
@@ -684,24 +690,38 @@ class Conciliator:
                 Operations=(self.config['COL_OP'], 'count')
             ).reset_index()
             
+            # Add inline header for this block
+            summary_rows.append({
+                'Nota Deudora': 'Nota Deudora',
+                'Total Deudora': 'Total Deudora',
+                'Notas Acreedoras': 'Notas Acreedoras',
+                'Monto Acreedor': 'Monto Acreedor'
+            })
+            
+            first_row = True
             for _, crow in creditor_breakdown.iterrows():
                 summary_rows.append({
-                    self.config['OUT_DEBTOR_FILE']: filename,
-                    'Total Nota Deudora': debtor_total,
-                    'Operaciones Deudoras': debtor_op_count,
-                    self.config['OUT_CREDIT_NOTE']: crow[f"{self.config['ACCOUNTING_REF']}_CREDIT"],
-                    'Contribucion Credito': crow['Credit_Amount'],
-                    'Operaciones Credito': crow['Operations'],
+                    'Nota Deudora': filename if first_row else '',
+                    'Total Deudora': debtor_total if first_row else '',
+                    'Notas Acreedoras': crow[f"{self.config['ACCOUNTING_REF']}_CREDIT"],
+                    'Monto Acreedor': crow['Credit_Amount']
                 })
+                first_row = False
             
             # Subtotal row for this debtor file
             summary_rows.append({
-                self.config['OUT_DEBTOR_FILE']: f"SUBTOTAL {filename}",
-                'Total Nota Deudora': debtor_total,
-                'Operaciones Deudoras': debtor_op_count,
-                self.config['OUT_CREDIT_NOTE']: f"{len(creditor_breakdown)} nota(s) de credito",
-                'Contribucion Credito': creditor_breakdown['Credit_Amount'].sum(),
-                'Operaciones Credito': creditor_breakdown['Operations'].sum(),
+                'Nota Deudora': f"SUBTOTAL {filename}",
+                'Total Deudora': '',
+                'Notas Acreedoras': '',
+                'Monto Acreedor': creditor_breakdown['Credit_Amount'].sum()
+            })
+            
+            # Blank line
+            summary_rows.append({
+                'Nota Deudora': '',
+                'Total Deudora': '',
+                'Notas Acreedoras': '',
+                'Monto Acreedor': ''
             })
                 
         self.fully_reconciled = pd.DataFrame(summary_rows)
@@ -725,24 +745,38 @@ class Conciliator:
                 Operations=(self.config['COL_OP'], 'count')
             ).reset_index()
             
+            # Add inline header for this block
+            summary_rows.append({
+                'Nota Acreedora': 'Nota Acreedora',
+                'Total Acreedora': 'Total Acreedora',
+                'Notas Deudoras': 'Notas Deudoras',
+                'Monto Deudor': 'Monto Deudor'
+            })
+            
+            first_row = True
             for _, drow in debtor_breakdown.iterrows():
                 summary_rows.append({
-                    self.config['OUT_CREDIT_NOTE']: credit_name,
-                    'Total Nota Credito': credit_total,
-                    'Operaciones Credito': credit_op_count,
-                    self.config['OUT_DEBTOR_FILE']: drow[f"{self.config['ACCOUNTING_REF']}_DEBT"],
-                    'Contribucion Deudora': drow['Debtor_Amount'],
-                    'Operaciones Deudoras': drow['Operations'],
+                    'Nota Acreedora': credit_name if first_row else '',
+                    'Total Acreedora': credit_total if first_row else '',
+                    'Notas Deudoras': drow[f"{self.config['ACCOUNTING_REF']}_DEBT"],
+                    'Monto Deudor': drow['Debtor_Amount']
                 })
+                first_row = False
             
             # Subtotal row for this credit file
             summary_rows.append({
-                self.config['OUT_CREDIT_NOTE']: f"SUBTOTAL {credit_name}",
-                'Total Nota Credito': credit_total,
-                'Operaciones Credito': credit_op_count,
-                self.config['OUT_DEBTOR_FILE']: f"{len(debtor_breakdown)} nota(s) deudora(s)",
-                'Contribucion Deudora': debtor_breakdown['Debtor_Amount'].sum(),
-                'Operaciones Deudoras': debtor_breakdown['Operations'].sum(),
+                'Nota Acreedora': f"SUBTOTAL {credit_name}",
+                'Total Acreedora': '',
+                'Notas Deudoras': '',
+                'Monto Deudor': debtor_breakdown['Debtor_Amount'].sum()
+            })
+            
+            # Blank line
+            summary_rows.append({
+                'Nota Acreedora': '',
+                'Total Acreedora': '',
+                'Notas Deudoras': '',
+                'Monto Deudor': ''
             })
         
         self.fully_reconciled_credits = pd.DataFrame(summary_rows)
@@ -819,8 +853,8 @@ class Conciliator:
                 
                 if not self.pending_claims.empty: self.pending_claims.to_excel(writer, sheet_name='DEUDORAS_Pendientes', index=False)
                 if not self.unexpected_refunds.empty: self.unexpected_refunds.to_excel(writer, sheet_name='Devoluciones_Inesperadas', index=False)
-                if not self.fully_reconciled.empty: self.fully_reconciled.to_excel(writer, sheet_name='Notas_Conciliadas', index=False)
-                if not self.fully_reconciled_credits.empty: self.fully_reconciled_credits.to_excel(writer, sheet_name='Conciliado_Por_Credito', index=False)
+                if not self.fully_reconciled.empty: self.fully_reconciled.to_excel(writer, sheet_name='Notas_Conciliadas', index=False, header=False)
+                if not self.fully_reconciled_credits.empty: self.fully_reconciled_credits.to_excel(writer, sheet_name='Conciliado_Por_Credito', index=False, header=False)
                 if not self.net_balanced.empty: self.net_balanced.to_excel(writer, sheet_name='Balance_Neto', index=False)
                 if not self.variance_report.empty: self.variance_report.to_excel(writer, sheet_name='Varianzas_Monto', index=False)
                 
@@ -888,17 +922,32 @@ class Conciliator:
             for row in range(2, ws.max_row + 1):
                 first_cell_value = str(ws.cell(row=row, column=1).value or '')
                 is_subtotal = first_cell_value.startswith('SUBTOTAL')
+                is_inline_header = first_cell_value in ['Nota Deudora', 'Nota Acreedora']
+                is_blank = first_cell_value.strip() == '' and all(str(ws.cell(row=row, column=c).value or '').strip() == '' for c in range(1, ws.max_column + 1))
                 
                 for col in range(1, ws.max_column + 1):
                     cell = ws.cell(row=row, column=col)
+                    
+                    if is_blank:
+                        cell.border = Border() # No border
+                        continue # No fill either
+                        
                     cell.border = thin_border
                     
                     if is_subtotal:
                         cell.font = subtotal_font
                         cell.fill = subtotal_fill
+                    elif is_inline_header:
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_alignment
                     else:
                         # Alternating row colors
                         cell.fill = alt_fill_1 if row % 2 == 0 else alt_fill_2
+                        
+                    # Format float/int values to 2 decimal accounting format
+                    if isinstance(cell.value, (int, float)):
+                        cell.number_format = '#,##0.00'
             
             # 3. Auto-column-width
             for col in range(1, ws.max_column + 1):
