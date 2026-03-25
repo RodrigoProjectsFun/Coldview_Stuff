@@ -71,6 +71,7 @@ class Conciliator:
         self.vff_debtor_notes = pd.DataFrame()  # Negative VFF differences (error)
         self.vff_acreedoras = pd.DataFrame()     # Positive VFF differences (credit notes)
         self.m6d_sin_match = pd.DataFrame()      # Orphaned M6D credits (no matching M2D)
+        self.vff_abnormal = pd.DataFrame()       # Fatal crashes during VFF matching
         
         # State
         self.merged_keys = set()
@@ -205,77 +206,95 @@ class Conciliator:
         
         grouped = df_vff.groupby([COL_CARD, COL_OP])
         
+        abnormal_rows = []
+        
         for (card, op), group in grouped:
-            group = group.reset_index(drop=True)
-            
-            if len(group) == 2:
-                # Normal pair: row 0 = debtor, row 1 = creditor
-                debtor_amt = group[AMT_FLOAT].iloc[0]
-                creditor_amt = group[AMT_FLOAT].iloc[1]
-                difference = creditor_amt - debtor_amt
+            try:
+                group = group.reset_index(drop=True)
                 
-                row = {
-                    COL_CARD: card,
-                    COL_OP: op,
-                    AMT_FLOAT: abs(difference),
-                    ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
-                    'VFF_Debtor_Amt': debtor_amt,
-                    'VFF_Creditor_Amt': creditor_amt,
-                    'VFF_Difference': difference,
-                    'VFF_Source_Files': ', '.join(group[ACCOUNTING_REF].unique()),
-                }
-                # Copy RECUPERAR if available
-                if COL_RECUPERAR in group.columns:
-                    row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
-                
-                if difference < 0:
-                    row['VFF_Note_Type'] = 'DEBTOR_NOTE (NEGATIVE)'
-                    debtor_note_rows.append(row)
-                    print(f"  ⚠ NOTA DEUDORA VFF: {card}/{op} dif={difference:.2f}")
-                else:
-                    row['VFF_Note_Type'] = 'CREDIT_NOTE'
-                    credit_rows.append(row)
+                if len(group) == 2:
+                    # Normal pair: row 0 = debtor, row 1 = creditor
+                    debtor_amt = group[AMT_FLOAT].iloc[0]
+                    creditor_amt = group[AMT_FLOAT].iloc[1]
+                    difference = creditor_amt - debtor_amt
                     
-            elif len(group) == 1:
-                # Single operation with no pair — should not normally happen
-                print(f"  ⚠ VFF SIN PAR: {card}/{op} en {group[ACCOUNTING_REF].iloc[0]} (cruce entre archivos)")
-                # This was already handled by cross-file concatenation;
-                # if still single after concat, it's truly unpaired
-                row = {
-                    COL_CARD: card,
-                    COL_OP: op,
-                    AMT_FLOAT: group[AMT_FLOAT].iloc[0],
-                    ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
-                    'VFF_Debtor_Amt': group[AMT_FLOAT].iloc[0],
-                    'VFF_Creditor_Amt': 0.0,
-                    'VFF_Difference': 0.0,
-                    'VFF_Source_Files': group[ACCOUNTING_REF].iloc[0],
-                    'VFF_Note_Type': 'UNPAIRED',
-                }
-                if COL_RECUPERAR in group.columns:
-                    row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
-                debtor_note_rows.append(row)
-            else:
-                # More than 2 rows for same key — unexpected
-                print(f"  ⚠ VFF ANOMALIA: {card}/{op} tiene {len(group)} filas")
-                # Take the first two as the pair
-                debtor_amt = group[AMT_FLOAT].iloc[0]
-                creditor_amt = group[AMT_FLOAT].iloc[1]
-                difference = creditor_amt - debtor_amt
-                row = {
-                    COL_CARD: card,
-                    COL_OP: op,
-                    AMT_FLOAT: abs(difference),
-                    ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
-                    'VFF_Debtor_Amt': debtor_amt,
-                    'VFF_Creditor_Amt': creditor_amt,
-                    'VFF_Difference': difference,
-                    'VFF_Source_Files': ', '.join(group[ACCOUNTING_REF].unique()),
-                    'VFF_Note_Type': 'ANOMALY_MULTI_ROW',
-                }
-                if COL_RECUPERAR in group.columns:
-                    row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
-                debtor_note_rows.append(row)
+                    row = {
+                        COL_CARD: card,
+                        COL_OP: op,
+                        AMT_FLOAT: abs(difference),
+                        ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
+                        'VFF_Debtor_Amt': debtor_amt,
+                        'VFF_Creditor_Amt': creditor_amt,
+                        'VFF_Difference': difference,
+                        'VFF_Source_Files': ', '.join(group[ACCOUNTING_REF].unique()),
+                    }
+                    # Copy RECUPERAR if available
+                    if COL_RECUPERAR in group.columns:
+                        row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
+                    
+                    if difference < 0:
+                        row['VFF_Note_Type'] = 'DEBTOR_NOTE (NEGATIVE)'
+                        debtor_note_rows.append(row)
+                        print(f"  ⚠ NOTA DEUDORA VFF: {card}/{op} dif={difference:.2f}")
+                    else:
+                        row['VFF_Note_Type'] = 'CREDIT_NOTE'
+                        credit_rows.append(row)
+                        
+                elif len(group) == 1:
+                    # Single operation with no pair — should not normally happen
+                    print(f"  ⚠ VFF SIN PAR: {card}/{op} en {group[ACCOUNTING_REF].iloc[0]} (cruce entre archivos)")
+                    # This was already handled by cross-file concatenation;
+                    # if still single after concat, it's truly unpaired
+                    row = {
+                        COL_CARD: card,
+                        COL_OP: op,
+                        AMT_FLOAT: group[AMT_FLOAT].iloc[0],
+                        ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
+                        'VFF_Debtor_Amt': group[AMT_FLOAT].iloc[0],
+                        'VFF_Creditor_Amt': 0.0,
+                        'VFF_Difference': 0.0,
+                        'VFF_Source_Files': group[ACCOUNTING_REF].iloc[0],
+                        'VFF_Note_Type': 'UNPAIRED',
+                    }
+                    if COL_RECUPERAR in group.columns:
+                        row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
+                    debtor_note_rows.append(row)
+                else:
+                    # More than 2 rows for same key — unexpected
+                    print(f"  ⚠ VFF ANOMALIA: {card}/{op} tiene {len(group)} filas")
+                    # Take the first two as the pair
+                    debtor_amt = group[AMT_FLOAT].iloc[0]
+                    creditor_amt = group[AMT_FLOAT].iloc[1]
+                    difference = creditor_amt - debtor_amt
+                    row = {
+                        COL_CARD: card,
+                        COL_OP: op,
+                        AMT_FLOAT: abs(difference),
+                        ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
+                        'VFF_Debtor_Amt': debtor_amt,
+                        'VFF_Creditor_Amt': creditor_amt,
+                        'VFF_Difference': difference,
+                        'VFF_Source_Files': ', '.join(group[ACCOUNTING_REF].unique()),
+                        'VFF_Note_Type': 'ANOMALY_MULTI_ROW',
+                    }
+                    if COL_RECUPERAR in group.columns:
+                        row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
+                    debtor_note_rows.append(row)
+            except Exception as e:
+                # Catch any severe crash gracefully and log to Abnormal sheet
+                print(f"  [ERROR GRAVE] Fallo inesperado en VFF {card}/{op}: {e}")
+                for _, r in group.iterrows():
+                    abnormal_rows.append({
+                        'Archivo_Origen': r.get(ACCOUNTING_REF, 'Desconocido'),
+                        'Tarjeta': card,
+                        'Operacion': op,
+                        'Monto_Original': r.get(AMT_FLOAT, 0.0),
+                        'Motivo_Crash': str(e)
+                    })
+        
+        self.vff_abnormal = pd.DataFrame(abnormal_rows) if abnormal_rows else pd.DataFrame()
+        if not self.vff_abnormal.empty:
+            print(f"  ⚠ {len(self.vff_abnormal)} operaciones causaron fallos criticos (movidos a VFF_Error_Fatal)")
         
         # Store debtor notes (negative differences + unpaired + anomalies)
         self.vff_debtor_notes = pd.DataFrame(debtor_note_rows) if debtor_note_rows else pd.DataFrame()
@@ -873,6 +892,10 @@ class Conciliator:
                 # VFF Matched transactions
                 if not self.merged_vff.empty:
                     self.merged_vff.to_excel(writer, sheet_name='VFF_Conciliadas', index=False)
+                    
+                # VFF Fatal Errors that caused crashes during matches
+                if not self.vff_abnormal.empty:
+                    self.vff_abnormal.to_excel(writer, sheet_name='VFF_Error_Fatal', index=False)
 
                 if not self.merged.empty:
                     self.merged.to_excel(writer, sheet_name='Registro_Auditoria', index=False)
