@@ -807,7 +807,7 @@ class Conciliator:
         candidates = set(self.pending_claims[self.config['ACCOUNTING_REF']].unique()) | set(self.unexpected_refunds[f"{self.config['ACCOUNTING_REF']}_DEBT"].unique())
         
         if not self.fully_reconciled.empty:
-            excluded = set(self.fully_reconciled[self.config['OUT_DEBTOR_FILE']].unique())
+            excluded = set(self.fully_reconciled['Nota Deudora'].dropna().unique())
             candidates = candidates - excluded
         
         # Optimization: Pre-group to avoid O(N) filtering inside loop
