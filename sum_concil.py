@@ -36,6 +36,7 @@ ACCOUNTING_REF = DEFAULT_CONFIG['ACCOUNTING_REF']
 
 DEBT_PATTERN = '*m2d-recu*.xlsx'
 CREDIT_PATTERN = '*m6d-dev*.xlsx'
+CREDIT_PATTERN_VFF = '*m6d-dev_vff*.xlsx'
 DEFAULT_FOLDER_PATH = './accounting_files'
 
 class Conciliator:
@@ -51,9 +52,12 @@ class Conciliator:
             
         self.df_debt = pd.DataFrame()
         self.df_credit = pd.DataFrame()
+        self.df_credit_vff = pd.DataFrame()
         self.debt_files = {}
         self.credit_files = {}
+        self.credit_vff_files = {}
         self.merged = pd.DataFrame()
+        self.merged_vff = pd.DataFrame()
         
         # Results
         self.pending_claims = pd.DataFrame()
@@ -61,6 +65,9 @@ class Conciliator:
         self.variance_report = pd.DataFrame()
         self.fully_reconciled = pd.DataFrame()
         self.net_balanced = pd.DataFrame()
+        self.vff_debtor_notes = pd.DataFrame()  # Negative VFF differences (error)
+        self.vff_acreedoras = pd.DataFrame()     # Positive VFF differences (credit notes)
+        self.m6d_sin_match = pd.DataFrame()      # Orphaned M6D credits (no matching M2D)
         
         # State
         self.merged_keys = set()
@@ -95,8 +102,10 @@ class Conciliator:
         """Loads all data from the configured folder path."""
         self.df_debt, self.debt_files = self._load_pile(DEBT_PATTERN, "DEBT")
         self.df_credit, self.credit_files = self._load_pile(CREDIT_PATTERN, "CREDIT")
+        self.df_credit_vff, self.credit_vff_files = self._load_vff_pile()
         
-        if self.df_debt.empty or self.df_credit.empty:
+        has_any_credit = not self.df_credit.empty or not self.df_credit_vff.empty
+        if self.df_debt.empty or not has_any_credit:
             print("Stopping: Missing data.")
             return False
         return True
@@ -106,6 +115,9 @@ class Conciliator:
         files = glob.glob(os.path.join(self.folder_path, pattern))
         filter_keyword = 'm2d-recu' if label == "DEBT" else 'm6d-dev'
         files = [f for f in files if filter_keyword in os.path.basename(f).lower()]
+        # Exclude VFF files from regular credit pile
+        if label == "CREDIT":
+            files = [f for f in files if 'm6d-dev_vff' not in os.path.basename(f).lower()]
         
         all_dfs = []
         individual_files = {}
@@ -124,6 +136,142 @@ class Conciliator:
         
         combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
         return combined, individual_files
+
+    def _load_vff_pile(self):
+        """
+        Loads VFF (M6D-DEV_VFF) files and computes credit notes from paired operations.
+        
+        VFF Business Rules:
+        - Each VFF file contains paired operations (same TARJETA + NUM OPE)
+        - Within each pair: row 1 = debtor import, row 2 = creditor import
+        - Credit note = creditor_amount - debtor_amount
+        - If difference is negative → debtor note (stored as error in self.vff_debtor_notes)
+        - Unpaired operations in one file are matched across other VFF files
+        """
+        files = glob.glob(os.path.join(self.folder_path, CREDIT_PATTERN_VFF))
+        files = [f for f in files if 'm6d-dev_vff' in os.path.basename(f).lower()]
+        
+        all_dfs = []
+        individual_files = {}
+        print(f"Loading {len(files)} files for CREDIT_VFF...")
+        
+        for f in files:
+            try:
+                df = self._process_single_file(f)
+                if df is not None:
+                    std_name = df[ACCOUNTING_REF].iloc[0]
+                    all_dfs.append(df)
+                    individual_files[std_name] = df.copy()
+            except Exception as e:
+                print(f"  [ERROR] {os.path.basename(f)}: {e}")
+        
+        if not all_dfs:
+            print("  No VFF files found.")
+            return pd.DataFrame(), {}
+        
+        # Concatenate all VFF data for cross-file matching
+        combined = pd.concat(all_dfs, ignore_index=True)
+        computed_credits = self._compute_vff_pairs(combined)
+        
+        return computed_credits, individual_files
+
+    def _compute_vff_pairs(self, df_vff):
+        """
+        Groups VFF rows by (TARJETA, NUM OPE) and computes credit notes.
+        Row 1 of each pair = debtor, Row 2 = creditor.
+        Returns a DataFrame of computed credit notes (one row per pair).
+        """
+        if df_vff.empty:
+            return pd.DataFrame()
+        
+        credit_rows = []
+        debtor_note_rows = []
+        
+        grouped = df_vff.groupby([COL_CARD, COL_OP])
+        
+        for (card, op), group in grouped:
+            group = group.reset_index(drop=True)
+            
+            if len(group) == 2:
+                # Normal pair: row 0 = debtor, row 1 = creditor
+                debtor_amt = group[AMT_FLOAT].iloc[0]
+                creditor_amt = group[AMT_FLOAT].iloc[1]
+                difference = creditor_amt - debtor_amt
+                
+                row = {
+                    COL_CARD: card,
+                    COL_OP: op,
+                    AMT_FLOAT: abs(difference),
+                    ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
+                    'VFF_Debtor_Amt': debtor_amt,
+                    'VFF_Creditor_Amt': creditor_amt,
+                    'VFF_Difference': difference,
+                    'VFF_Source_Files': ', '.join(group[ACCOUNTING_REF].unique()),
+                }
+                # Copy RECUPERAR if available
+                if COL_RECUPERAR in group.columns:
+                    row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
+                
+                if difference < 0:
+                    row['VFF_Note_Type'] = 'DEBTOR_NOTE (NEGATIVE)'
+                    debtor_note_rows.append(row)
+                    print(f"  ⚠ VFF DEBTOR NOTE: {card}/{op} diff={difference:.2f}")
+                else:
+                    row['VFF_Note_Type'] = 'CREDIT_NOTE'
+                    credit_rows.append(row)
+                    
+            elif len(group) == 1:
+                # Single operation with no pair — should not normally happen
+                print(f"  ⚠ VFF UNPAIRED: {card}/{op} in {group[ACCOUNTING_REF].iloc[0]} (matched cross-file)")
+                # This was already handled by cross-file concatenation;
+                # if still single after concat, it's truly unpaired
+                row = {
+                    COL_CARD: card,
+                    COL_OP: op,
+                    AMT_FLOAT: group[AMT_FLOAT].iloc[0],
+                    ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
+                    'VFF_Debtor_Amt': group[AMT_FLOAT].iloc[0],
+                    'VFF_Creditor_Amt': 0.0,
+                    'VFF_Difference': 0.0,
+                    'VFF_Source_Files': group[ACCOUNTING_REF].iloc[0],
+                    'VFF_Note_Type': 'UNPAIRED',
+                }
+                if COL_RECUPERAR in group.columns:
+                    row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
+                debtor_note_rows.append(row)
+            else:
+                # More than 2 rows for same key — unexpected
+                print(f"  ⚠ VFF ANOMALY: {card}/{op} has {len(group)} rows")
+                # Take the first two as the pair
+                debtor_amt = group[AMT_FLOAT].iloc[0]
+                creditor_amt = group[AMT_FLOAT].iloc[1]
+                difference = creditor_amt - debtor_amt
+                row = {
+                    COL_CARD: card,
+                    COL_OP: op,
+                    AMT_FLOAT: abs(difference),
+                    ACCOUNTING_REF: group[ACCOUNTING_REF].iloc[0],
+                    'VFF_Debtor_Amt': debtor_amt,
+                    'VFF_Creditor_Amt': creditor_amt,
+                    'VFF_Difference': difference,
+                    'VFF_Source_Files': ', '.join(group[ACCOUNTING_REF].unique()),
+                    'VFF_Note_Type': 'ANOMALY_MULTI_ROW',
+                }
+                if COL_RECUPERAR in group.columns:
+                    row[COL_RECUPERAR] = group[COL_RECUPERAR].iloc[0]
+                debtor_note_rows.append(row)
+        
+        # Store debtor notes (negative differences + unpaired + anomalies)
+        self.vff_debtor_notes = pd.DataFrame(debtor_note_rows) if debtor_note_rows else pd.DataFrame()
+        if not self.vff_debtor_notes.empty:
+            print(f"  ⚠ Found {len(self.vff_debtor_notes)} VFF debtor notes / errors")
+        
+        # Store valid credit notes
+        self.vff_acreedoras = pd.DataFrame(credit_rows) if credit_rows else pd.DataFrame()
+        if not self.vff_acreedoras.empty:
+            print(f"  ✓ Computed {len(self.vff_acreedoras)} VFF credit notes (acreedoras)")
+        
+        return self.vff_acreedoras
 
     def _process_single_file(self, filepath):
         """Reads and cleans a single Excel file."""
@@ -319,45 +467,101 @@ class Conciliator:
     # =========================================================================
     def match_transactions(self):
         print("Matching Transactions...")
-        self.merged = pd.merge(
-            self.df_debt, 
-            self.df_credit, 
-            on=[COL_CARD, COL_OP], 
-            how='inner', 
-            suffixes=('_DEBT', '_CREDIT')
-        )
-        if self.merged.empty:
+        if not self.df_credit.empty:
+            self.merged = pd.merge(
+                self.df_debt, 
+                self.df_credit, 
+                on=[COL_CARD, COL_OP], 
+                how='inner', 
+                suffixes=('_DEBT', '_CREDIT')
+            )
+        else:
+            self.merged = pd.DataFrame()
+        
+        # Match VFF credits against M2D debts
+        self._match_vff_transactions()
+        
+        if self.merged.empty and self.merged_vff.empty:
             print("No matches found.")
             return False
         return self._check_orphans()
 
+    def _match_vff_transactions(self):
+        """Matches VFF computed credit notes against M2D debt files."""
+        if self.df_credit_vff.empty:
+            print("  No VFF credits to match.")
+            return
+        
+        print("Matching VFF credits against M2D debts...")
+        self.merged_vff = pd.merge(
+            self.df_debt,
+            self.df_credit_vff,
+            on=[COL_CARD, COL_OP],
+            how='inner',
+            suffixes=('_DEBT', '_CREDIT')
+        )
+        
+        if not self.merged_vff.empty:
+            print(f"  ✓ Matched {len(self.merged_vff)} VFF credits to M2D debts")
+        
+        # Unmatched VFF credits → unexpected refunds
+        if not self.df_credit_vff.empty:
+            vff_keys = set(zip(self.df_credit_vff[COL_CARD], self.df_credit_vff[COL_OP]))
+            matched_vff_keys = set(zip(self.merged_vff[COL_CARD], self.merged_vff[COL_OP])) if not self.merged_vff.empty else set()
+            unmatched_vff_keys = vff_keys - matched_vff_keys
+            
+            if unmatched_vff_keys:
+                print(f"  ⚠ {len(unmatched_vff_keys)} VFF credits with no M2D match → Unexpected Refunds")
+                self.df_credit_vff['temp_key'] = list(zip(self.df_credit_vff[COL_CARD], self.df_credit_vff[COL_OP]))
+                unmatched_vff = self.df_credit_vff[self.df_credit_vff['temp_key'].isin(unmatched_vff_keys)].copy()
+                unmatched_vff.drop(columns=['temp_key'], inplace=True)
+                # Add VFF source marker
+                unmatched_vff['VFF_Source'] = 'VFF_UNMATCHED'
+                self.unexpected_refunds = pd.concat([self.unexpected_refunds, unmatched_vff], ignore_index=True)
+                self.df_credit_vff.drop(columns=['temp_key'], inplace=True)
+
     def _check_orphans(self):
         print("Analyzing unmatched records...")
-        merged_keys = set(zip(self.merged[COL_CARD], self.merged[COL_OP]))
-        credit_keys = set(zip(self.df_credit[COL_CARD], self.df_credit[COL_OP]))
-        orphaned_credit_keys = credit_keys - merged_keys
+        merged_keys = set(zip(self.merged[COL_CARD], self.merged[COL_OP])) if not self.merged.empty else set()
         
-        if orphaned_credit_keys:
-            print(f"\n{'='*60}\n❌  CRITICAL ERROR: ORPHANED CREDITS DETECTED\n{'='*60}")
-            print(f"  Found {len(orphaned_credit_keys)} credits with NO matching debt!")
-            print("  Every credit MUST have a corresponding debt.")
+        # Also include VFF matched keys
+        vff_matched_keys = set(zip(self.merged_vff[COL_CARD], self.merged_vff[COL_OP])) if not self.merged_vff.empty else set()
+        all_matched_keys = merged_keys | vff_matched_keys
+        
+        # Check orphans for regular credits (NON-BLOCKING — alert + M6D SIN MATCH sheet)
+        if not self.df_credit.empty:
+            credit_keys = set(zip(self.df_credit[COL_CARD], self.df_credit[COL_OP]))
+            orphaned_credit_keys = credit_keys - merged_keys
             
-            # Identify problematic files
-            df_credit_chk = self.df_credit.copy()
-            df_credit_chk['temp_key'] = list(zip(df_credit_chk[COL_CARD], df_credit_chk[COL_OP]))
-            
-            orphans_df = df_credit_chk[df_credit_chk['temp_key'].isin(orphaned_credit_keys)]
-            problem_files = orphans_df[ACCOUNTING_REF].unique()
-            
-            print("\n  ⚠️  PROBLEMATIC FILES (Containing Orphaned Credits):")
-            for f in problem_files:
-                print(f"     - {f}")
+            if orphaned_credit_keys:
+                print(f"\n{'='*60}")
+                print(f"⚠️  M6D SIN MATCH: {len(orphaned_credit_keys)} credits with NO matching debt")
+                print(f"{'='*60}")
                 
-            print("\nConciliation ABORTED.")
-            return False
+                # Identify and log problematic files
+                df_credit_chk = self.df_credit.copy()
+                df_credit_chk['temp_key'] = list(zip(df_credit_chk[COL_CARD], df_credit_chk[COL_OP]))
+                
+                orphans_df = df_credit_chk[df_credit_chk['temp_key'].isin(orphaned_credit_keys)].copy()
+                problem_files = orphans_df[ACCOUNTING_REF].unique()
+                
+                print("\n  📂 M6D FILES WITH UNMATCHED OPERATIONS:")
+                for f in problem_files:
+                    file_orphan_count = len(orphans_df[orphans_df[ACCOUNTING_REF] == f])
+                    print(f"     - {f}: {file_orphan_count} unmatched operation(s)")
+                
+                # Store for export — include origin file name
+                orphans_df.drop(columns=['temp_key'], inplace=True)
+                orphans_df.rename(columns={ACCOUNTING_REF: 'Origin_File'}, inplace=True)
+                self.m6d_sin_match = orphans_df
+                
+                print(f"\n  ℹ️  These will be exported to the 'M6D SIN MATCH' sheet.")
+                print(f"  Conciliation will continue.\n")
+        
+        # VFF orphaned credits are NOT blocking — already funneled to unexpected refunds
         
         debt_keys = set(zip(self.df_debt[COL_CARD], self.df_debt[COL_OP]))
-        orphaned_debt_keys = debt_keys - merged_keys
+        orphaned_debt_keys = debt_keys - all_matched_keys
         if orphaned_debt_keys:
             print(f"\n📊 UNMATCHED DEBTS: {len(orphaned_debt_keys)} (Informational)")
         else:
@@ -537,14 +741,14 @@ class Conciliator:
         try:
             with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
                 # Breakdowns
-                # Breakdowns
-                self.merged.groupby([f"{self.config['ACCOUNTING_REF']}_DEBT", f"{self.config['ACCOUNTING_REF']}_CREDIT"]).agg(
-                    Count=(self.config['COL_OP'], 'count'), Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum')
-                ).reset_index().to_excel(writer, sheet_name='By_Debt_File', index=False)
-                
-                self.merged.groupby([f"{self.config['ACCOUNTING_REF']}_CREDIT", f"{self.config['ACCOUNTING_REF']}_DEBT"]).agg(
-                    Count=(self.config['COL_OP'], 'count'), Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum')
-                ).reset_index().to_excel(writer, sheet_name='By_Credit_File', index=False)
+                if not self.merged.empty:
+                    self.merged.groupby([f"{self.config['ACCOUNTING_REF']}_DEBT", f"{self.config['ACCOUNTING_REF']}_CREDIT"]).agg(
+                        Count=(self.config['COL_OP'], 'count'), Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum')
+                    ).reset_index().to_excel(writer, sheet_name='By_Debt_File', index=False)
+                    
+                    self.merged.groupby([f"{self.config['ACCOUNTING_REF']}_CREDIT", f"{self.config['ACCOUNTING_REF']}_DEBT"]).agg(
+                        Count=(self.config['COL_OP'], 'count'), Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum')
+                    ).reset_index().to_excel(writer, sheet_name='By_Credit_File', index=False)
                 
                 if not self.pending_claims.empty: self.pending_claims.to_excel(writer, sheet_name='Pending_Claims', index=False)
                 if not self.unexpected_refunds.empty: self.unexpected_refunds.to_excel(writer, sheet_name='Unexpected_Refunds', index=False)
@@ -552,11 +756,28 @@ class Conciliator:
                 if not self.net_balanced.empty: self.net_balanced.to_excel(writer, sheet_name='Net_Balanced_Files', index=False)
                 if not self.variance_report.empty: self.variance_report.to_excel(writer, sheet_name='Amount_Variances', index=False)
                 
+                # M6D SIN MATCH - orphaned M6D credits with origin filenames
+                if not self.m6d_sin_match.empty:
+                    self.m6d_sin_match.to_excel(writer, sheet_name='M6D SIN MATCH', index=False)
+                
+                # VFF Acreedoras sheet
+                if not self.vff_acreedoras.empty:
+                    self.vff_acreedoras.to_excel(writer, sheet_name='Acreedoras', index=False)
+                
+                # VFF Debtor Notes (errors - negative differences)
+                if not self.vff_debtor_notes.empty:
+                    self.vff_debtor_notes.to_excel(writer, sheet_name='VFF_Debtor_Notes', index=False)
+                
+                # VFF Matched transactions
+                if not self.merged_vff.empty:
+                    self.merged_vff.to_excel(writer, sheet_name='VFF_Matched', index=False)
+                
                 # Export separate sheets for Fully Reconciled Files
                 if not self.fully_reconciled.empty:
                     self._export_individual_sheets(writer)
 
-                self.merged.to_excel(writer, sheet_name='Detailed_Audit_Log', index=False)
+                if not self.merged.empty:
+                    self.merged.to_excel(writer, sheet_name='Detailed_Audit_Log', index=False)
                 
             print(f"SUCCESS. Report saved to: {output_file}")
         except PermissionError:

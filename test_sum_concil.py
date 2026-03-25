@@ -765,6 +765,234 @@ class TestIntegration(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.accounting_folder, 'm6d-dev 01.05.2026.xlsx')))
 
 
+class TestVFFCreditLogic(unittest.TestCase):
+    """Tests for VFF (M6D-DEV_VFF) paired credit note computation and matching."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.test_dir = tempfile.mkdtemp()
+        cls.accounting_folder = os.path.join(cls.test_dir, 'accounting_files')
+        os.makedirs(cls.accounting_folder, exist_ok=True)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.test_dir, ignore_errors=True)
+
+    def setUp(self):
+        for f in os.listdir(self.accounting_folder):
+            os.remove(os.path.join(self.accounting_folder, f))
+
+    def _create_test_excel(self, filename, data):
+        df = pd.DataFrame(data)
+        path = os.path.join(self.accounting_folder, filename)
+        df.to_excel(path, index=False)
+        return path
+
+    # =========================================================================
+    # TEST VFF 1: PAIR COMPUTATION
+    # =========================================================================
+    def test_vff_pair_computation(self):
+        """Test that VFF paired operations produce correct credit note = creditor - debtor"""
+        from sum_concil import Conciliator, COL_CARD, COL_OP, AMT_FLOAT, ACCOUNTING_REF
+
+        c = Conciliator()
+        df_vff = pd.DataFrame({
+            COL_CARD: ['1234', '1234', '5678', '5678'],
+            COL_OP: ['OP-001', 'OP-001', 'OP-002', 'OP-002'],
+            AMT_FLOAT: [100.0, 250.0, 300.0, 500.0],
+            ACCOUNTING_REF: ['ACREEDORA 01.20.2026'] * 4,
+            'RECUPERAR': ['SI'] * 4,
+        })
+
+        result = c._compute_vff_pairs(df_vff)
+
+        self.assertEqual(len(result), 2, "Should produce 2 credit notes from 2 pairs")
+
+        row1 = result[result[COL_OP] == 'OP-001'].iloc[0]
+        self.assertAlmostEqual(row1['VFF_Difference'], 150.0, places=2,
+            msg="Credit note for OP-001 should be 250 - 100 = 150")
+        self.assertAlmostEqual(row1[AMT_FLOAT], 150.0, places=2)
+
+        row2 = result[result[COL_OP] == 'OP-002'].iloc[0]
+        self.assertAlmostEqual(row2['VFF_Difference'], 200.0, places=2,
+            msg="Credit note for OP-002 should be 500 - 300 = 200")
+
+    # =========================================================================
+    # TEST VFF 2: NEGATIVE DIFFERENCE = DEBTOR NOTE
+    # =========================================================================
+    def test_vff_negative_difference_flagged(self):
+        """Test that negative VFF differences are captured as debtor notes (error)"""
+        from sum_concil import Conciliator, COL_CARD, COL_OP, AMT_FLOAT, ACCOUNTING_REF
+
+        c = Conciliator()
+        df_vff = pd.DataFrame({
+            COL_CARD: ['1234', '1234'],
+            COL_OP: ['OP-001', 'OP-001'],
+            AMT_FLOAT: [500.0, 200.0],  # creditor < debtor → negative
+            ACCOUNTING_REF: ['ACREEDORA 01.20.2026'] * 2,
+            'RECUPERAR': ['SI'] * 2,
+        })
+
+        result = c._compute_vff_pairs(df_vff)
+
+        self.assertTrue(result.empty or len(result) == 0,
+            "Negative difference should NOT be in credit notes")
+        self.assertFalse(c.vff_debtor_notes.empty,
+            "Negative difference should be in vff_debtor_notes")
+        self.assertEqual(c.vff_debtor_notes.iloc[0]['VFF_Note_Type'], 'DEBTOR_NOTE (NEGATIVE)')
+        self.assertAlmostEqual(c.vff_debtor_notes.iloc[0]['VFF_Difference'], -300.0, places=2)
+
+    # =========================================================================
+    # TEST VFF 3: VFF MATCHING AGAINST M2D
+    # =========================================================================
+    def test_vff_matching_against_m2d(self):
+        """Test that VFF computed credits match against M2D debts"""
+        from sum_concil import Conciliator, COL_CARD, COL_OP, AMT_FLOAT, ACCOUNTING_REF
+
+        # Create M2D debt file
+        self._create_test_excel('m2d-recu 01.01.2026.xlsx', {
+            'TARJETA': ['1234', '5678'],
+            'NUM OPE': ['OP-001', 'OP-002'],
+            'IMP VISA': ['100.00', '300.00'],
+            'RECUPERAR': ['NO', 'NO'],
+        })
+
+        # Create VFF file with paired operations
+        self._create_test_excel('m6d-dev_vff 01.20.2026.xlsx', {
+            'TARJETA': ['1234', '1234'],
+            'NUM OPE': ['OP-001', 'OP-001'],
+            'IMP VISA': ['100.00', '250.00'],
+            'RECUPERAR': ['SI', 'SI'],
+        })
+
+        c = Conciliator(folder_path=self.accounting_folder)
+        loaded = c.load_data()
+        self.assertTrue(loaded, "Data should load successfully")
+
+        # VFF credits should be loaded
+        self.assertFalse(c.df_credit_vff.empty, "VFF credits should be computed")
+
+        # Match
+        result = c.match_transactions()
+        self.assertTrue(result, "Matching should succeed")
+
+        # VFF should match against M2D
+        self.assertFalse(c.merged_vff.empty, "VFF should have matches against M2D")
+
+    # =========================================================================
+    # TEST VFF 4: UNMATCHED VFF → UNEXPECTED REFUNDS
+    # =========================================================================
+    def test_vff_no_match_goes_to_unexpected(self):
+        """Test that VFF credits with no M2D match go to unexpected refunds"""
+        from sum_concil import Conciliator, COL_CARD, COL_OP, AMT_FLOAT, ACCOUNTING_REF
+
+        # Create M2D debt file - does NOT contain OP-999
+        self._create_test_excel('m2d-recu 01.01.2026.xlsx', {
+            'TARJETA': ['5678'],
+            'NUM OPE': ['OP-002'],
+            'IMP VISA': ['300.00'],
+            'RECUPERAR': ['NO'],
+        })
+
+        # Create VFF file with operation that has NO matching M2D
+        self._create_test_excel('m6d-dev_vff 01.20.2026.xlsx', {
+            'TARJETA': ['9999', '9999'],
+            'NUM OPE': ['OP-999', 'OP-999'],
+            'IMP VISA': ['100.00', '250.00'],
+            'RECUPERAR': ['SI', 'SI'],
+        })
+
+        c = Conciliator(folder_path=self.accounting_folder)
+        c.load_data()
+        c.match_transactions()
+
+        # VFF credit with no M2D match should be in unexpected refunds
+        self.assertFalse(c.unexpected_refunds.empty,
+            "Unmatched VFF credit should appear in unexpected refunds")
+
+    # =========================================================================
+    # TEST VFF 5: REGULAR CREDIT EXCLUDES VFF
+    # =========================================================================
+    def test_regular_credit_excludes_vff(self):
+        """Test that VFF files are NOT loaded into the regular credit pile"""
+        from sum_concil import Conciliator
+
+        # Create a regular credit AND a VFF file
+        self._create_test_excel('m6d-dev 01.05.2026.xlsx', {
+            'TARJETA': ['1234'],
+            'NUM OPE': ['OP-001'],
+            'IMP VISA': ['100.00'],
+        })
+
+        self._create_test_excel('m6d-dev_vff 01.20.2026.xlsx', {
+            'TARJETA': ['5678', '5678'],
+            'NUM OPE': ['OP-002', 'OP-002'],
+            'IMP VISA': ['100.00', '250.00'],
+        })
+
+        # Also need a debt file for load_data to succeed
+        self._create_test_excel('m2d-recu 01.01.2026.xlsx', {
+            'TARJETA': ['1234'],
+            'NUM OPE': ['OP-001'],
+            'IMP VISA': ['100.00'],
+        })
+
+        c = Conciliator(folder_path=self.accounting_folder)
+        c.load_data()
+
+        # Regular credit should only have 1 row (not VFF data)
+        self.assertEqual(len(c.df_credit), 1,
+            "Regular credit pile should exclude VFF files")
+
+        # VFF should have been loaded separately
+        self.assertFalse(c.df_credit_vff.empty,
+            "VFF should be loaded in its own pile")
+
+    # =========================================================================
+    # TEST VFF 6: CROSS-FILE MATCHING
+    # =========================================================================
+    def test_vff_cross_file_matching(self):
+        """Test that unpaired VFF operations match across other VFF files"""
+        from sum_concil import Conciliator, COL_CARD, COL_OP, AMT_FLOAT, ACCOUNTING_REF
+
+        # VFF file 1: has debtor side of OP-001
+        self._create_test_excel('m6d-dev_vff 01.20.2026.xlsx', {
+            'TARJETA': ['1234'],
+            'NUM OPE': ['OP-001'],
+            'IMP VISA': ['100.00'],
+            'RECUPERAR': ['SI'],
+        })
+
+        # VFF file 2: has creditor side of OP-001
+        self._create_test_excel('m6d-dev_vff 01.25.2026.xlsx', {
+            'TARJETA': ['1234'],
+            'NUM OPE': ['OP-001'],
+            'IMP VISA': ['250.00'],
+            'RECUPERAR': ['SI'],
+        })
+
+        # Need a debt file for load_data
+        self._create_test_excel('m2d-recu 01.01.2026.xlsx', {
+            'TARJETA': ['1234'],
+            'NUM OPE': ['OP-001'],
+            'IMP VISA': ['100.00'],
+        })
+
+        c = Conciliator(folder_path=self.accounting_folder)
+        c.load_data()
+
+        # Cross-file matching should produce a paired credit note
+        self.assertFalse(c.df_credit_vff.empty,
+            "Cross-file VFF match should produce a computed credit note")
+
+        # The credit note should be 250 - 100 = 150
+        if not c.df_credit_vff.empty:
+            self.assertAlmostEqual(
+                c.df_credit_vff['VFF_Difference'].iloc[0], 150.0, places=2,
+                msg="Cross-file credit note should be 250 - 100 = 150"
+            )
+
+
 if __name__ == '__main__':
     # Run with verbose output
     unittest.main(verbosity=2)
