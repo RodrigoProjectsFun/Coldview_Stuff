@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import glob
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -113,7 +114,7 @@ class Conciliator:
         return True
 
     def _load_pile(self, pattern, label):
-        """Internal helper to load files matching a pattern."""
+        """Internal helper to load files matching a pattern (parallel I/O)."""
         files = glob.glob(os.path.join(self.folder_path, pattern))
         filter_keyword = 'm2d-recu' if label == "DEBT" else 'm6d-dev'
         files = [f for f in files if filter_keyword in os.path.basename(f).lower()]
@@ -125,18 +126,20 @@ class Conciliator:
         individual_files = {}
         print(f"Cargando {len(files)} archivos para {label}...")
 
-        for f in files:
-            try:
-                df = self._process_single_file(f)
-                if df is not None:
-                    # Store result
-                    std_name = df[ACCOUNTING_REF].iloc[0] # Use the name we just set
-                    all_dfs.append(df)
-                    individual_files[std_name] = df.copy()
-            except Exception as e:
-                print(f"  [ERROR] {os.path.basename(f)}: {e}")
+        # Parallel file loading
+        with ThreadPoolExecutor(max_workers=max(1, min(len(files), os.cpu_count() or 4))) as executor:
+            future_to_file = {executor.submit(self._process_single_file, f): f for f in files}
+            for future in as_completed(future_to_file):
+                f = future_to_file[future]
+                try:
+                    df = future.result()
+                    if df is not None:
+                        std_name = df[ACCOUNTING_REF].iloc[0]
+                        all_dfs.append(df)
+                        individual_files[std_name] = df
+                except Exception as e:
+                    print(f"  [ERROR] {os.path.basename(f)}: {e}")
 
-        
         combined = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
         return combined, individual_files
 
@@ -158,15 +161,19 @@ class Conciliator:
         individual_files = {}
         print(f"Cargando {len(files)} archivos para CREDIT_VFF...")
         
-        for f in files:
-            try:
-                df = self._process_single_file(f)
-                if df is not None:
-                    std_name = df[ACCOUNTING_REF].iloc[0]
-                    all_dfs.append(df)
-                    individual_files[std_name] = df.copy()
-            except Exception as e:
-                print(f"  [ERROR] {os.path.basename(f)}: {e}")
+        # Parallel file loading
+        with ThreadPoolExecutor(max_workers=min(len(files) or 1, os.cpu_count() or 4)) as executor:
+            future_to_file = {executor.submit(self._process_single_file, f): f for f in files}
+            for future in as_completed(future_to_file):
+                f = future_to_file[future]
+                try:
+                    df = future.result()
+                    if df is not None:
+                        std_name = df[ACCOUNTING_REF].iloc[0]
+                        all_dfs.append(df)
+                        individual_files[std_name] = df
+                except Exception as e:
+                    print(f"  [ERROR] {os.path.basename(f)}: {e}")
         
         if not all_dfs:
             print("  No se encontraron archivos VFF.")
@@ -541,11 +548,9 @@ class Conciliator:
                 print(f"⚠️  M6D SIN MATCH: {len(orphaned_credit_keys)} creditos SIN deuda correspondiente")
                 print(f"{'='*60}")
                 
-                # Identify and log problematic files
-                df_credit_chk = self.df_credit.copy()
-                df_credit_chk['temp_key'] = list(zip(df_credit_chk[COL_CARD], df_credit_chk[COL_OP]))
-                
-                orphans_df = df_credit_chk[df_credit_chk['temp_key'].isin(orphaned_credit_keys)].copy()
+                # Use fast vectorised merge for extracting orphans
+                keys_df = pd.DataFrame(list(orphaned_credit_keys), columns=[COL_CARD, COL_OP])
+                orphans_df = self.df_credit.merge(keys_df, on=[COL_CARD, COL_OP], how='inner').copy()
                 problem_files = orphans_df[ACCOUNTING_REF].unique()
                 
                 print("\n  📂 ARCHIVOS M6D CON OPERACIONES SIN CONCILIAR:")
@@ -554,7 +559,6 @@ class Conciliator:
                     print(f"     - {f}: {file_orphan_count} operacion(es) sin conciliar")
                 
                 # Store for export — include origin file name
-                orphans_df.drop(columns=['temp_key'], inplace=True)
                 orphans_df.rename(columns={ACCOUNTING_REF: 'Archivo_Origen'}, inplace=True)
                 self.m6d_sin_match = orphans_df
                 
@@ -605,13 +609,17 @@ class Conciliator:
         print("Aplicando logica de negocio 'RECUPERAR'...")
         
         # 1. Pending Claims (RECUPERAR='NO' and not matched)
-        self.merged_keys = set(zip(self.merged[self.config['COL_CARD']], self.merged[self.config['COL_OP']]))
-        self.df_debt['temp_key'] = list(zip(self.df_debt[self.config['COL_CARD']], self.df_debt[self.config['COL_OP']]))
+        self.merged_keys = set(zip(self.merged[self.config['COL_CARD']], self.merged[self.config['COL_OP']])) if not self.merged.empty else set()
         
-        self.pending_claims = self.df_debt[
-            (self.df_debt[self.config['COL_RECUPERAR']] == 'NO') & 
-            (~self.df_debt['temp_key'].isin(self.merged_keys))
-        ].copy()
+        # Fast Anti-Join using merge instead of tuple mapping
+        debt_no = self.df_debt[self.df_debt[self.config['COL_RECUPERAR']] == 'NO'].copy()
+        if not debt_no.empty and self.merged_keys:
+            merged_keys_df = pd.DataFrame(list(self.merged_keys), columns=[self.config['COL_CARD'], self.config['COL_OP']])
+            merged_keys_df['_is_matched'] = True
+            joined = debt_no.merge(merged_keys_df, on=[self.config['COL_CARD'], self.config['COL_OP']], how='left')
+            self.pending_claims = joined[joined['_is_matched'].isna()].drop(columns=['_is_matched']).copy()
+        else:
+            self.pending_claims = debt_no if not self.merged_keys else pd.DataFrame()
         
         if not self.pending_claims.empty:
             print(f"  ⚠ Se encontraron {len(self.pending_claims)} DEUDORAS PENDIENTES")
@@ -639,6 +647,14 @@ class Conciliator:
         pending_exclusion_set = set(self.pending_claims[self.config['ACCOUNTING_REF']].unique()) if not self.pending_claims.empty else set()
         unexpected_exclusion_set = set(self.unexpected_refunds[f"{self.config['ACCOUNTING_REF']}_DEBT"].unique()) if not self.unexpected_refunds.empty else set()
         
+        # Pre-group the merged dataframe by DEBT file where RECUPERAR is 'NO'
+        # This reduces filtering from O(N^2) down to O(N) lookup !
+        if not self.merged.empty:
+            filtered_merged = self.merged[self.merged[f"{self.config['COL_RECUPERAR']}_DEBT"] == 'NO']
+            merged_by_debt = {k: v for k, v in filtered_merged.groupby(f"{self.config['ACCOUNTING_REF']}_DEBT")}
+        else:
+            merged_by_debt = {}
+
         for filename, group in debt_groups:
             # Check Exclusions first (fastest check)
             if filename in pending_exclusion_set: continue
@@ -647,15 +663,11 @@ class Conciliator:
             total_no = group[group[self.config['COL_RECUPERAR']] == 'NO']
             if total_no.empty: continue
             
-            # Verify 100% Match
-            matched_no = total_no[total_no['temp_key'].isin(self.merged_keys)]
-            if len(total_no) != len(matched_no): continue
+            # Lookup pre-filtered frame
+            relevant_merged = merged_by_debt.get(filename, pd.DataFrame())
             
-            # Verify Variance
-            relevant_merged = self.merged[
-                (self.merged[f"{self.config['ACCOUNTING_REF']}_DEBT"] == filename) & 
-                (self.merged[f"{self.config['COL_RECUPERAR']}_DEBT"] == 'NO')
-            ]
+            # Verify 100% Match (if lengths match, everything matched since there are no duplicates and they joined strictly)
+            if len(total_no) != len(relevant_merged): continue
             
             # Set intersection for variance check (faster than loop)
             current_keys = set(zip(relevant_merged[f"{self.config['ACCOUNTING_REF']}_CREDIT"], relevant_merged[self.config['COL_CARD']], relevant_merged[self.config['COL_OP']]))
