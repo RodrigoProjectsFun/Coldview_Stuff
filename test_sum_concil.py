@@ -252,16 +252,16 @@ class TestSumConcil(unittest.TestCase):
         c._generate_credit_reconciled_summary()
         summary = c.fully_reconciled_credits
         
-        # Since [1234, OP-001] is dropped to unique, there's only 1 unique operation.
+        # Since [1234, OP-001] is dropped to unique for the credit note total, there's only 1 unique operation.
         # So Total Acreedora should be exactly 200 (not 400).
-        # Monto Deudor should be exactly 100 (not 200).
+        # However, the Debtor breakdown MUST sum both matched operations, so Monto Deudor is 200.
         
         # summary_rows contains the header row, the data row, the subtotal row, and a blank row.
         # Data row is at index 1
         data_row = summary.iloc[1]
         
         self.assertEqual(data_row['Total Acreedora'], 200.0, "Total Acreedora should not be inflated by duplicates")
-        self.assertEqual(data_row['Monto Deudor'], 100.0, "Monto Deudor should not be inflated by duplicates")
+        self.assertEqual(data_row['Monto Deudor'], 200.0, "Monto Deudor MUST normally sum all matched debtor operations")
 
 
     # =========================================================================

@@ -710,13 +710,13 @@ class Conciliator:
                 continue
             
             # --- Build ticket-ready breakdown ---
-            unique_ops = relevant_merged.drop_duplicates(subset=[self.config['COL_CARD'], self.config['COL_OP']])
-            debtor_total = unique_ops[f"{self.config['AMT_FLOAT']}_DEBT"].sum()
-            debtor_op_count = len(unique_ops)
+            debtor_total = relevant_merged[f"{self.config['AMT_FLOAT']}_DEBT"].sum()
+            debtor_op_count = len(relevant_merged)
             
             # Credit note breakdown: which credit files cover this debtor note
-            creditor_breakdown = unique_ops.groupby(f"{self.config['ACCOUNTING_REF']}_CREDIT").agg(
-                Credit_Amount=(f"{self.config['AMT_FLOAT']}_CREDIT", 'sum'),
+            # We sum _DEBT here so that Monto Acreedor exactly matches and balances the portion of the debt it covered!
+            creditor_breakdown = relevant_merged.groupby(f"{self.config['ACCOUNTING_REF']}_CREDIT").agg(
+                Credit_Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum'),
                 Operations=(self.config['COL_OP'], 'count')
             ).reset_index()
             
@@ -766,12 +766,14 @@ class Conciliator:
         credit_groups = self.merged.groupby(f"{self.config['ACCOUNTING_REF']}_CREDIT")
         
         for credit_name, credit_group in credit_groups:
-            unique_ops = credit_group.drop_duplicates(subset=[self.config['COL_CARD'], self.config['COL_OP']])
-            credit_total = unique_ops[f"{self.config['AMT_FLOAT']}_CREDIT"].sum() if f"{self.config['AMT_FLOAT']}_CREDIT" in unique_ops.columns else 0.0
-            credit_op_count = len(unique_ops)
+            # Only unique ops for the credit_total because a 1-to-M match will replicate the credit row
+            unique_credits = credit_group.drop_duplicates(subset=[self.config['COL_CARD'], self.config['COL_OP']])
+            credit_total = unique_credits[f"{self.config['AMT_FLOAT']}_CREDIT"].sum() if f"{self.config['AMT_FLOAT']}_CREDIT" in unique_credits.columns else 0.0
+            credit_op_count = len(unique_credits)
             
             # Debtor breakdown: which debtor files this credit covers
-            debtor_breakdown = unique_ops.groupby(f"{self.config['ACCOUNTING_REF']}_DEBT").agg(
+            # MUST use credit_group (without dropping dupes) so that M matching debts are fully mapped and sum correctly!
+            debtor_breakdown = credit_group.groupby(f"{self.config['ACCOUNTING_REF']}_DEBT").agg(
                 Debtor_Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum'),
                 Operations=(self.config['COL_OP'], 'count')
             ).reset_index()
