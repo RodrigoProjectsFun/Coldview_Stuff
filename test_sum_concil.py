@@ -228,6 +228,42 @@ class TestSumConcil(unittest.TestCase):
         self.assertEqual(debt_breakdown['Total_Conciliated_Amount'].iloc[0], 250.0)
         self.assertEqual(debt_breakdown['Count_Operations'].iloc[0], 2)
 
+    def test_credit_summary_accounting_avoids_cartesian_inflation(self):
+        """
+        Test that `_generate_credit_reconciled_summary` correctly deduplicates by [TARJETA, NUM OPE] 
+        so that multiple matches (Cartesian product) do not artificially inflate the sum.
+        """
+        from sum_concil import Conciliator
+        
+        c = Conciliator()
+        
+        # Simulating Cartesian product: 1 credit op matching 2 debt ops
+        c.merged = pd.DataFrame({
+            'TARJETA': ['1234', '1234'],
+            'NUM OPE': ['OP-001', 'OP-001'],
+            'Amt_Float_DEBT': [100.0, 100.0],
+            'Amt_Float_CREDIT': [200.0, 200.0],
+            'Accounting_Ref_DEBT': ['M2D 1', 'M2D 1'],
+            'Accounting_Ref_CREDIT': ['M6D 1', 'M6D 1'],
+            'RECUPERAR_DEBT': ['SI', 'SI'],
+            'RECUPERAR': ['SI', 'SI']
+        })
+        
+        c._generate_credit_reconciled_summary()
+        summary = c.fully_reconciled_credits
+        
+        # Since [1234, OP-001] is dropped to unique, there's only 1 unique operation.
+        # So Total Acreedora should be exactly 200 (not 400).
+        # Monto Deudor should be exactly 100 (not 200).
+        
+        # summary_rows contains the header row, the data row, the subtotal row, and a blank row.
+        # Data row is at index 1
+        data_row = summary.iloc[1]
+        
+        self.assertEqual(data_row['Total Acreedora'], 200.0, "Total Acreedora should not be inflated by duplicates")
+        self.assertEqual(data_row['Monto Deudor'], 100.0, "Monto Deudor should not be inflated by duplicates")
+
+
     # =========================================================================
     # TEST 4B: DUPLICATE FILE DETECTION (Critical Human Error Prevention)
     # =========================================================================

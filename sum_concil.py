@@ -519,7 +519,17 @@ class Conciliator:
         if self.merged.empty and self.merged_vff.empty:
             print("No se encontraron coincidencias.")
             return False
-        return self._check_orphans()
+            
+        success = self._check_orphans()
+        
+        # Integrate elegantly so they appear naturally in unified summaries and analytical trackers
+        if not self.merged_vff.empty:
+            if self.merged.empty:
+                self.merged = self.merged_vff.copy()
+            else:
+                self.merged = pd.concat([self.merged, self.merged_vff], ignore_index=True)
+                
+        return success
 
     def _match_vff_transactions(self):
         """Matches VFF computed credit notes against M2D debt files."""
@@ -700,12 +710,13 @@ class Conciliator:
                 continue
             
             # --- Build ticket-ready breakdown ---
-            debtor_total = relevant_merged[f"{self.config['AMT_FLOAT']}_DEBT"].sum()
-            debtor_op_count = len(relevant_merged)
+            unique_ops = relevant_merged.drop_duplicates(subset=[self.config['COL_CARD'], self.config['COL_OP']])
+            debtor_total = unique_ops[f"{self.config['AMT_FLOAT']}_DEBT"].sum()
+            debtor_op_count = len(unique_ops)
             
             # Credit note breakdown: which credit files cover this debtor note
-            creditor_breakdown = relevant_merged.groupby(f"{self.config['ACCOUNTING_REF']}_CREDIT").agg(
-                Credit_Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum'),
+            creditor_breakdown = unique_ops.groupby(f"{self.config['ACCOUNTING_REF']}_CREDIT").agg(
+                Credit_Amount=(f"{self.config['AMT_FLOAT']}_CREDIT", 'sum'),
                 Operations=(self.config['COL_OP'], 'count')
             ).reset_index()
             
@@ -755,11 +766,12 @@ class Conciliator:
         credit_groups = self.merged.groupby(f"{self.config['ACCOUNTING_REF']}_CREDIT")
         
         for credit_name, credit_group in credit_groups:
-            credit_total = credit_group[f"{self.config['AMT_FLOAT']}_CREDIT"].iloc[0] if f"{self.config['AMT_FLOAT']}_CREDIT" in credit_group.columns else 0.0
-            credit_op_count = len(credit_group)
+            unique_ops = credit_group.drop_duplicates(subset=[self.config['COL_CARD'], self.config['COL_OP']])
+            credit_total = unique_ops[f"{self.config['AMT_FLOAT']}_CREDIT"].sum() if f"{self.config['AMT_FLOAT']}_CREDIT" in unique_ops.columns else 0.0
+            credit_op_count = len(unique_ops)
             
             # Debtor breakdown: which debtor files this credit covers
-            debtor_breakdown = credit_group.groupby(f"{self.config['ACCOUNTING_REF']}_DEBT").agg(
+            debtor_breakdown = unique_ops.groupby(f"{self.config['ACCOUNTING_REF']}_DEBT").agg(
                 Debtor_Amount=(f"{self.config['AMT_FLOAT']}_DEBT", 'sum'),
                 Operations=(self.config['COL_OP'], 'count')
             ).reset_index()
@@ -889,10 +901,6 @@ class Conciliator:
                 if not self.vff_debtor_notes.empty:
                     self.vff_debtor_notes.to_excel(writer, sheet_name='VFF_Notas_Deudoras', index=False)
                 
-                # VFF Matched transactions
-                if not self.merged_vff.empty:
-                    self.merged_vff.to_excel(writer, sheet_name='VFF_Conciliadas', index=False)
-                    
                 # VFF Fatal Errors that caused crashes during matches
                 if not self.vff_abnormal.empty:
                     self.vff_abnormal.to_excel(writer, sheet_name='VFF_Error_Fatal', index=False)
@@ -900,12 +908,43 @@ class Conciliator:
                 if not self.merged.empty:
                     self.merged.to_excel(writer, sheet_name='Registro_Auditoria', index=False)
                 
+                # Build Index Sheet
+                self._build_index_sheet(writer)
+                
                 # Apply styling to all sheets
                 self._apply_excel_styling(writer)
                 
             print(f"EXITO. Reporte guardado en: {output_file}")
         except PermissionError:
             print(f"ERROR: Cierre {output_file} e intente de nuevo.")
+
+    def _build_index_sheet(self, writer):
+        """Creates an Index sheet with hyperlinks to all other sheets."""
+        workbook = writer.book
+        if 'Indice' in workbook.sheetnames:
+            return
+            
+        index_ws = workbook.create_sheet('Indice', 0)
+        workbook.active = index_ws
+        
+        # Title
+        title_cell = index_ws.cell(row=1, column=1, value="INDICE DE HOJAS")
+        title_cell.font = Font(bold=True, size=14, color='FFFFFF')
+        title_cell.fill = PatternFill(start_color='2F5496', end_color='2F5496', fill_type='solid')
+        title_cell.alignment = Alignment(horizontal='center', vertical='center')
+        
+        row_idx = 3
+        for sheet_name in workbook.sheetnames:
+            if sheet_name == 'Indice':
+                continue
+            
+            # Create hyperlink to the sheet
+            cell = index_ws.cell(row=row_idx, column=1, value=f"👉 Ir a: {sheet_name}")
+            cell.hyperlink = f"#'{sheet_name}'!A1"
+            cell.font = Font(color="0563C1", underline="single", bold=True)
+            row_idx += 2
+            
+        index_ws.column_dimensions['A'].width = 40
 
     def _apply_excel_styling(self, writer):
         """Applies professional formatting to all Excel sheets."""
@@ -929,6 +968,9 @@ class Conciliator:
         
         workbook = writer.book
         for sheet_name in workbook.sheetnames:
+            if sheet_name == 'Indice':
+                continue
+                
             ws = workbook[sheet_name]
             if ws.max_row is None or ws.max_row < 1:
                 continue
@@ -980,6 +1022,13 @@ class Conciliator:
                     max_length = max(max_length, len(cell_value))
                 adjusted_width = min(max_length + 3, 50)  # Cap at 50
                 ws.column_dimensions[get_column_letter(col)].width = adjusted_width
+            
+            # 4. Add "Volver al Indice" link
+            back_col = ws.max_column + 2
+            back_cell = ws.cell(row=1, column=back_col, value="⬅ Volver al Indice")
+            back_cell.hyperlink = "#'Indice'!A1"
+            back_cell.font = Font(color="0563C1", underline="single", bold=True)
+            ws.column_dimensions[get_column_letter(back_col)].width = 25
             
 
     def run(self):
