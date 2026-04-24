@@ -1,107 +1,76 @@
-import asyncio
-from playwright.async_api import async_playwright
+import subprocess
+import pandas as pd
+import os
+import sys
 
-# --- CONFIGURATION ---
-TARGET_URL = "https://your-blocked-site.com" 
-# ---------------------
+def get_resource_path(relative_path):
+    """Gets the absolute path to a resource for PyInstaller compatibility."""
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 
-async def run_xray_clean():
-    async with async_playwright() as p:
-        print("1. Launching Browser...")
-        
-        # Launch visible browser
-        browser = await p.chromium.launch(
-            headless=False,
-            channel="chrome",
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]
-        )
-        
-        # Create Context
-        context = await browser.new_context(viewport={"width": 1920, "height": 3000})
-        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        
-        page = await context.new_page()
+def run_executable(exe_path, args=None):
+    """Runs the external executable."""
+    command = [exe_path]
+    if args:
+        command.extend(args)
+    
+    print("Generating text files...")
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        print(f"Error: The executable failed.\n{e.stderr}")
+        sys.exit(1)
+    except FileNotFoundError:
+        print(f"Error: Could not find the executable at '{exe_path}'.")
+        sys.exit(1)
 
-        # --- THE FIX: BLOCK INTERCOM & ANALYTICS ---
-        # This prevents the "missing user hash" error by killing the chat widget entirely.
-        print("   -> Blocking Intercom/Chat scripts to prevent errors...")
-        await page.route("**/*intercom*", lambda route: route.abort())
-        await page.route("**/*widget*", lambda route: route.abort())
-        # -------------------------------------------
+def process_and_cleanup(txt_file1, txt_file2, output_excel, column_names):
+    """Reads fixed-width text files, merges them, and saves to Excel."""
+    if not os.path.exists(txt_file1) or not os.path.exists(txt_file2):
+        print("Error: The text files were not generated properly.")
+        sys.exit(1)
 
-        print(f"2. Navigating to {TARGET_URL}...")
-        try:
-            await page.goto(TARGET_URL, timeout=60000)
-        except:
-            print("Page loaded (or timed out), continuing...")
+    print("Reading aligned text files and converting to Excel...")
+    try:
+        # read_fwf automatically detects the visual column alignment
+        # names=column_names applies your custom headers to the top
+        df1 = pd.read_fwf(txt_file1, names=column_names) 
+        df2 = pd.read_fwf(txt_file2, names=column_names)
 
-        # ============================================================
-        # THE LOGIN PAUSE
-        # ============================================================
-        print("\n" + "="*50)
-        print("ACTION REQUIRED: Log in manually in the opened window.")
-        print("Navigate to the dashboard where you see 'POS' and 'ATM'.")
-        input(">>> WHEN YOU ARE READY, CLICK HERE AND PRESS ENTER <<<")
-        print("="*50 + "\n")
-        # ============================================================
+        # Stack the two dataframes vertically
+        # ignore_index=True ensures the row numbers reset cleanly from top to bottom
+        combined_df = pd.concat([df1, df2], axis=0, ignore_index=True)
 
-        print("3. Analyzing page structure (X-Ray Vision)...")
-
-        # INJECT JAVASCRIPT TO DRAW BOXES
-        await page.evaluate("""() => {
-            const elements = document.querySelectorAll('div, section, article, table, tr');
+        # Write the combined data to a single sheet
+        combined_df.to_excel(output_excel, index=False, sheet_name='Combined Data')
             
-            elements.forEach(el => {
-                const rect = el.getBoundingClientRect();
-                if (rect.width > 50 && rect.height > 50) {
-                    
-                    let color = 'red'; 
-                    let text = el.innerText.toUpperCase();
-                    
-                    // Highlight POS and ATM containers specifically
-                    if (text.includes('POS') || text.includes('ATM')) {
-                        color = '#00ff00'; # Neon Green
-                        el.style.boxShadow = '0px 0px 10px #00ff00';
-                    }
+        print(f"Success! Excel file created: {output_excel}")
 
-                    el.style.border = `2px solid ${color}`;
-                    el.style.position = 'relative';
+        # --- CLEAN UP PHASE ---
+        print("Cleaning up temporary text files...")
+        os.remove(txt_file1)
+        os.remove(txt_file2)
+        print("Cleanup complete.")
 
-                    const label = document.createElement('span');
-                    
-                    let name = el.tagName.toLowerCase();
-                    if (el.id) name += '#' + el.id;
-                    if (el.className && typeof el.className === 'string' && el.className.length > 0) {
-                         name += '.' + el.className.split(' ')[0];
-                    }
-
-                    label.innerText = name;
-                    
-                    label.style.position = 'absolute';
-                    label.style.top = '0';
-                    label.style.left = '0';
-                    label.style.background = color;
-                    label.style.color = 'black';
-                    label.style.fontSize = '12px';
-                    label.style.fontWeight = 'bold';
-                    label.style.zIndex = '10000';
-                    label.style.padding = '2px';
-                    
-                    if (!el.getAttribute('data-xray')) {
-                        el.setAttribute('data-xray', 'true');
-                        el.appendChild(label);
-                    }
-                }
-            });
-        }""")
-
-        filename = "layout_blueprint.png"
-        await page.screenshot(path=filename, full_page=True)
-        
-        print(f"SUCCESS! Map saved to: {filename}")
-        print("Open the image and look for the GREEN boxes.")
-
-        await browser.close()
+    except Exception as e:
+        print(f"An error occurred during conversion or cleanup: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(run_xray_clean())
+    # --- CONFIGURATION ---
+    EXE_NAME = "your_program.exe" 
+    EXECUTABLE_PATH = get_resource_path(EXE_NAME) 
+    EXECUTABLE_ARGS = [] 
+    
+    TEXT_FILE_1 = "output1.txt" 
+    TEXT_FILE_2 = "output2.txt" 
+    EXCEL_OUTPUT = "Combined_Results.xlsx"
+    
+    # Define your shared column names here
+    SHARED_COLUMNS = ["Column_A", "Column_B", "Column_C", "Column_D"] 
+    # ---------------------
+
+    run_executable(EXECUTABLE_PATH, EXECUTABLE_ARGS)
+    process_and_cleanup(TEXT_FILE_1, TEXT_FILE_2, EXCEL_OUTPUT, SHARED_COLUMNS)
