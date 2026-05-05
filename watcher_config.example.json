@@ -1,11 +1,23 @@
 {
-    "watch_dir": "C:\\Path\\To\\Watch\\Directory",
-    "target_file": "filename.csv",
-    "dest_dir": "C:\\Path\\To\\Destination",
-    "scheduled_times": [
-        "09:00",
-        "12:00",
-        "17:00"
-    ],
-    "run_on_startup": true
+    "website": {
+        "url": "https://your-grafana-instance.com/d/your-dashboard-id",
+        "login": {
+            "username": "YOUR_USERNAME",
+            "password": "YOUR_PASSWORD",
+            "username_selector": "css:input[name='user']",
+            "password_selector": "css:input[name='password']",
+            "login_button_selector": "css:button[type='submit']",
+            "wait_after_login_seconds": 5
+        },
+        "target_texts": ["POS", "AFC3", "AFC7"],
+        "wait_after_refresh_seconds": 5
+    },
+    "onedrive": {
+        "triggers_folder": "C:\\Users\\YourUser\\OneDrive\\WatcherTriggers",
+        "responses_folder": "C:\\Users\\YourUser\\OneDrive\\WatcherResponses"
+    },
+    "browser": {
+        "headless": false,
+        "poll_interval_seconds": 3
+    }
 }

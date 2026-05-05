@@ -1,1 +1,4 @@
 schedule
+DrissionPage
+httpx
+Pillow
